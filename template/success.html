@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+
+{% block title %}OAuth Success - Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card" style="text-align: center;">
+        <div class="success-icon">✅</div>
+        <h1 class="success-title">OAuth Flow Completed Successfully!</h1>
+        <p class="success-subtitle">Your authorization code has been exchanged for tokens</p>
+        
+        <div class="token-grid">
+            <div class="token-item">
+                <div class="token-label">Access Token</div>
+                <div class="token-value">{{ tokens.access_token }}</div>
+            </div>
+            <div class="token-item">
+                <div class="token-label">Token Type</div>
+                <div class="token-value">{{ tokens.token_type }}</div>
+            </div>
+            <div class="token-item">
+                <div class="token-label">Expires In</div>
+                <div class="token-value">{{ tokens.expires_in }} seconds</div>
+            </div>
+            <div class="token-item">
+                <div class="token-label">Refresh Token</div>
+                <div class="token-value">{{ tokens.refresh_token }}</div>
+            </div>
+            <div class="token-item">
+                <div class="token-label">Scope</div>
+                <div class="token-value">{{ tokens.scope }}</div>
+            </div>
+        </div>
+        
+        <div class="info-note">
+            <strong>Note:</strong> All token information is displayed above. Check the console for detailed request/response logs.
+        </div>
+        
+        <div style="margin-top: 2rem;">
+            <a href="/" class="btn">Start New Flow</a>
+            <a href="/health" class="btn btn-secondary">Health Check</a>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>HTTP Request & Response Details</h2>
+        <div class="http-details-container">
+            <div class="http-section">
+                <h3 class="http-section-title">📤 Request</h3>
+                <div class="http-content">
+                    <div class="http-line"><strong>{{ tokens.http_data.request_method }} {{ tokens.http_data.request_url }}</strong></div>
+                    <div class="http-line"><strong>Headers:</strong></div>
+                    <div class="http-json">{{ tokens.http_data.request_headers | tojson(indent=2) }}</div>
+                    <div class="http-line"><strong>Body:</strong></div>
+                    <div class="http-body">{{ tokens.http_data.request_body }}</div>
+                </div>
+            </div>
+            <div class="http-section">
+                <h3 class="http-section-title">📥 Response</h3>
+                <div class="http-content">
+                    <div class="http-line"><strong>Status: {{ tokens.http_data.response_status }}</strong></div>
+                    <div class="http-line"><strong>Headers:</strong></div>
+                    <div class="http-json">{{ tokens.http_data.response_headers | tojson(indent=2) }}</div>
+                    <div class="http-line"><strong>Body:</strong></div>
+                    <div class="http-body">{{ tokens.http_data.response_body }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

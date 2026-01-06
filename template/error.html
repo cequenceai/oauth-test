@@ -1,0 +1,44 @@
+{% extends "base.html" %}
+
+{% block title %}OAuth Error - Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="card" style="text-align: center;">
+        <div class="error-icon">{{ error_icon }}</div>
+        <h1 class="error-title">{{ error_title }}</h1>
+        <div class="error-details">
+            {{ error_message | safe }}
+        </div>
+        <a href="/" class="btn">{{ action_text }}</a>
+    </div>
+    
+    {% if http_data %}
+    <div class="card">
+        <h2>HTTP Request & Response Details</h2>
+        <div class="http-details-container">
+            <div class="http-section">
+                <h3 class="http-section-title">📤 Request</h3>
+                <div class="http-content">
+                    <div class="http-line"><strong>{{ http_data.request_method }} {{ http_data.request_url }}</strong></div>
+                    <div class="http-line"><strong>Headers:</strong></div>
+                    <div class="http-json">{{ http_data.request_headers | tojson(indent=2) }}</div>
+                    <div class="http-line"><strong>Body:</strong></div>
+                    <div class="http-body">{{ http_data.request_body }}</div>
+                </div>
+            </div>
+            <div class="http-section">
+                <h3 class="http-section-title">📥 Response</h3>
+                <div class="http-content">
+                    <div class="http-line"><strong>Status: {{ http_data.response_status }}</strong></div>
+                    <div class="http-line"><strong>Headers:</strong></div>
+                    <div class="http-json">{{ http_data.response_headers | tojson(indent=2) }}</div>
+                    <div class="http-line"><strong>Body:</strong></div>
+                    <div class="http-body">{{ http_data.response_body }}</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+</div>
+{% endblock %}

@@ -1,0 +1,211 @@
+{% extends "base.html" %}
+
+{% block title %}OAuth 2.0 Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>OAuth 2.0 Flow Tester</h1>
+        <p>Debug and test OAuth authorization flows step by step</p>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'success' if category == 'success' else 'error' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    
+    <div class="card">
+        <div class="text-center">
+            <a href="/auth" class="btn">Start OAuth Flow</a>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Configuration Editor</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">Edit your OAuth configuration directly in the browser. Changes will be applied immediately.</p>
+        
+        <form method="POST" action="/update-config" class="config-form">
+            <div class="form-sections">
+                <!-- OAuth Endpoints Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">OAuth Endpoints</h3>
+                    <div class="form-group full-width">
+                        <label for="auth_url">Authorization URL</label>
+                        <input type="url" id="auth_url" name="auth_url" value="{{ config.auth_url }}" required>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="token_url">Token URL</label>
+                        <input type="url" id="token_url" name="token_url" value="{{ config.token_url }}" required>
+                    </div>
+                </div>
+                
+                <!-- Client Credentials Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Client Credentials</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_id">Client ID</label>
+                            <input type="text" id="client_id" name="client_id" value="{{ config.client_id }}" required>
+                        </div>
+                        <div class="form-group">
+                            <label for="client_secret">Client Secret</label>
+                            <input type="password" id="client_secret" name="client_secret" value="{{ config.client_secret }}" required>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- OAuth Settings Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">OAuth Settings</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="scopes">Scopes</label>
+                            <input type="text" id="scopes" name="scopes" value="{{ config.scopes }}" placeholder="e.g., read write">
+                        </div>
+                        <div class="form-group">
+                            <label for="use_pkce">Use PKCE</label>
+                            <select id="use_pkce" name="use_pkce">
+                                <option value="true" {{ 'selected' if config.use_pkce else '' }}>Enabled</option>
+                                <option value="false" {{ 'selected' if not config.use_pkce else '' }}>Disabled</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="verify_ssl">SSL Verification</label>
+                            <select id="verify_ssl" name="verify_ssl">
+                                <option value="true" {{ 'selected' if config.verify_ssl else '' }}>Enabled (Recommended)</option>
+                                <option value="false" {{ 'selected' if not config.verify_ssl else '' }}>Disabled (Testing Only)</option>
+                            </select>
+                            <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                                Disable only if you encounter SSL certificate errors during testing
+                            </small>
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_auth_method">Client Authentication Method</label>
+                            <select id="client_auth_method" name="client_auth_method">
+                                <option value="client_secret_post" {{ 'selected' if config.client_auth_method == 'client_secret_post' else '' }}>client_secret_post (Body)</option>
+                                <option value="client_secret_basic" {{ 'selected' if config.client_auth_method == 'client_secret_basic' else '' }}>client_secret_basic (Basic Auth)</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label for="redirect_uri">Redirect URI</label>
+                            <input type="url" id="redirect_uri" name="redirect_uri" value="{{ config.redirect_uri }}" required>
+                        </div>
+                    </div>
+                </div>
+                
+                
+                <!-- Advanced Parameters Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Advanced Parameters</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="acr_values">ACR Values</label>
+                            <input type="text" id="acr_values" name="acr_values" value="{{ config.acr_values }}" placeholder="e.g., urn:se:curity:authentication:username:username">
+                        </div>
+                        <div class="form-group">
+                            <label for="prompt">Prompt</label>
+                            <input type="text" id="prompt" name="prompt" value="{{ config.prompt }}" placeholder="e.g., login, consent">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="login_hint">Login Hint</label>
+                            <input type="text" id="login_hint" name="login_hint" value="{{ config.login_hint }}" placeholder="e.g., user@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="nonce">Nonce</label>
+                            <input type="text" id="nonce" name="nonce" value="{{ config.nonce }}" placeholder="e.g., 1599046102647-dv4">
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn">Update Configuration</button>
+                <button type="button" class="btn btn-secondary" onclick="resetForm()">Reset to Defaults</button>
+            </div>
+        </form>
+    </div>
+    
+    <div class="card">
+        <h2>Current Configuration</h2>
+        <div class="config-grid">
+            <div class="config-item">
+                <div class="config-label">Authorization URL</div>
+                <div class="config-value">{{ config.auth_url }}</div>
+            </div>
+            <div class="config-item">
+                <div class="config-label">Token URL</div>
+                <div class="config-value">{{ config.token_url }}</div>
+            </div>
+            <div class="config-item">
+                <div class="config-label">Client ID</div>
+                <div class="config-value">{{ config.client_id }}</div>
+            </div>
+            <div class="config-item">
+                <div class="config-label">Scopes</div>
+                <div class="config-value">{{ config.scopes }}</div>
+            </div>
+            <div class="config-item">
+                <div class="config-label">Redirect URI</div>
+                <div class="config-value">{{ config.redirect_uri }}</div>
+            </div>
+                    <div class="config-item">
+                        <div class="config-label">PKCE Status</div>
+                        <div class="config-value">
+                            <span class="status-badge {{ 'status-enabled' if config.use_pkce else 'status-disabled' }}">
+                                {{ 'Enabled' if config.use_pkce else 'Disabled' }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">SSL Verification</div>
+                        <div class="config-value">
+                            <span class="status-badge {{ 'status-enabled' if config.verify_ssl else 'status-disabled' }}">
+                                {{ 'Enabled' if config.verify_ssl else 'Disabled' }}
+                            </span>
+                        </div>
+                    </div>
+                    <div class="config-item">
+                        <div class="config-label">Client Auth Method</div>
+                        <div class="config-value">{{ config.client_auth_method }}</div>
+                    </div>
+                    {% if config.acr_values %}
+                    <div class="config-item">
+                        <div class="config-label">ACR Values</div>
+                        <div class="config-value">{{ config.acr_values }}</div>
+                    </div>
+                    {% endif %}
+                    {% if config.prompt %}
+                    <div class="config-item">
+                        <div class="config-label">Prompt</div>
+                        <div class="config-value">{{ config.prompt }}</div>
+                    </div>
+                    {% endif %}
+                    {% if config.login_hint %}
+                    <div class="config-item">
+                        <div class="config-label">Login Hint</div>
+                        <div class="config-value">{{ config.login_hint }}</div>
+                    </div>
+                    {% endif %}
+                    {% if config.nonce %}
+                    <div class="config-item">
+                        <div class="config-label">Nonce</div>
+                        <div class="config-value">{{ config.nonce }}</div>
+                    </div>
+                    {% endif %}
+        </div>
+        <div class="note">
+            <strong>Note:</strong> If you see placeholder values, make sure your <code>.env</code> file is properly configured.
+        </div>
+    </div>
+</div>
+{% endblock %}
