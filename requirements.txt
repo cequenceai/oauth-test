@@ -1,0 +1,26 @@
+# OAuth 2.0 Authorization Code Flow Tester - Python Dependencies
+
+# Web framework for handling OAuth callbacks
+Flask==2.3.3
+
+# HTTP library for making token requests
+requests==2.31.0
+
+# Additional Flask dependencies (automatically installed with Flask)
+Werkzeug==2.3.7
+Jinja2==3.1.2
+MarkupSafe==2.1.3
+itsdangerous==2.1.2
+click==8.1.7
+
+# HTTP utilities (automatically installed with requests)
+urllib3==2.0.7
+certifi==2023.7.22
+charset-normalizer==3.3.2
+idna==3.4
+
+# Environment variable management
+python-dotenv==1.0.0
+
+# Template engine
+Jinja2==3.1.2
