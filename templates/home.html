@@ -9,6 +9,11 @@
         <p>Debug and test OAuth authorization flows step by step</p>
     </div>
     
+    <div class="tab-navigation">
+        <a href="/" class="tab-link active">Authorization Code Flow</a>
+        <a href="/dcr" class="tab-link">Dynamic Client Registration</a>
+    </div>
+    
     {% with messages = get_flashed_messages(with_categories=true) %}
         {% if messages %}
             {% for category, message in messages %}

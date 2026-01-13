@@ -537,6 +537,193 @@
                 align-items: center;
             }
         }
+        
+        /* Tab Navigation Styles */
+        .tab-navigation {
+            display: flex;
+            justify-content: center;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 2px solid #e9ecef;
+            padding-bottom: 0;
+        }
+        
+        .tab-link {
+            padding: 1rem 2rem;
+            text-decoration: none;
+            color: #6c757d;
+            font-weight: 500;
+            border-bottom: 3px solid transparent;
+            transition: all 0.2s;
+            position: relative;
+            top: 2px;
+        }
+        
+        .tab-link:hover {
+            color: #007bff;
+        }
+        
+        .tab-link.active {
+            color: #007bff;
+            border-bottom-color: #007bff;
+        }
+        
+        .btn-success {
+            background-color: #28a745;
+        }
+        
+        .btn-success:hover {
+            background-color: #218838;
+        }
+        
+        .btn-danger {
+            background-color: #dc3545;
+        }
+        
+        .btn-danger:hover {
+            background-color: #c82333;
+        }
+        
+        .btn-sm {
+            padding: 8px 16px;
+            font-size: 0.875rem;
+        }
+        
+        .form-group textarea {
+            padding: 0.75rem;
+            border: 1px solid #ced4da;
+            border-radius: 4px;
+            font-size: 0.9rem;
+            transition: border-color 0.2s, box-shadow 0.2s;
+            background-color: #ffffff;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            resize: vertical;
+            min-height: 100px;
+        }
+        
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #007bff;
+            box-shadow: 0 0 0 2px rgba(0, 123, 255, 0.25);
+        }
+        
+        .array-input-container {
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .array-input-row {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .array-input-row input {
+            flex: 1;
+        }
+        
+        .array-input-row button {
+            padding: 0.5rem 0.75rem;
+            background-color: #dc3545;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+        }
+        
+        .array-input-row button:hover {
+            background-color: #c82333;
+        }
+        
+        .add-array-item-btn {
+            padding: 0.5rem 1rem;
+            background-color: #28a745;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 0.875rem;
+            align-self: flex-start;
+        }
+        
+        .add-array-item-btn:hover {
+            background-color: #218838;
+        }
+        
+        .response-container {
+            margin-top: 2rem;
+            padding: 1.5rem;
+            background-color: #f8f9fa;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .response-title {
+            color: #2c3e50;
+            font-size: 1.2rem;
+            font-weight: 600;
+            margin-bottom: 1rem;
+        }
+        
+        .json-display {
+            background-color: #ffffff;
+            border: 1px solid #dee2e6;
+            border-radius: 4px;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', 'Ubuntu Mono', monospace;
+            font-size: 0.85rem;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        .discovery-section {
+            background-color: #f8f9fa;
+            padding: 1.5rem;
+            border-radius: 6px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .discovery-section .form-row {
+            margin-bottom: 0;
+        }
+        
+        #discover-btn {
+            white-space: nowrap;
+        }
+        
+        @media (max-width: 768px) {
+            .tab-navigation {
+                flex-direction: column;
+                gap: 0;
+            }
+            
+            .tab-link {
+                text-align: center;
+                border-bottom: none;
+                border-left: 3px solid transparent;
+                top: 0;
+            }
+            
+            .tab-link.active {
+                border-bottom: none;
+                border-left-color: #007bff;
+            }
+            
+            .discovery-section .form-row {
+                grid-template-columns: 1fr;
+            }
+            
+            .discovery-section .form-group {
+                align-items: stretch !important;
+            }
+            
+            #discover-btn {
+                width: 100%;
+            }
+        }
     </style>
 </head>
 <body>

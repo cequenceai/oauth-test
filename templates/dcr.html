@@ -1,0 +1,665 @@
+{% extends "base.html" %}
+
+{% block title %}Dynamic Client Registration - OAuth 2.0 Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>OAuth 2.0 Flow Tester</h1>
+        <p>Debug and test OAuth authorization flows step by step</p>
+    </div>
+    
+    <div class="tab-navigation">
+        <a href="/" class="tab-link">Authorization Code Flow</a>
+        <a href="/dcr" class="tab-link active">Dynamic Client Registration</a>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'success' if category == 'success' else 'error' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div class="card">
+        <h2>Auto-Discovery (Optional)</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">
+            Automatically discover OAuth/OIDC endpoints from the issuer URL using RFC 8414 / OpenID Connect Discovery.
+        </p>
+        
+        <div class="discovery-section">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="discovery_issuer_url">Issuer / Base URL</label>
+                    <input type="url" id="discovery_issuer_url" placeholder="https://your-provider.com">
+                    <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                        Examples: https://accounts.google.com, https://login.microsoftonline.com/tenant-id
+                    </small>
+                </div>
+                <div class="form-group">
+                    <label for="discovery_access_token">Access Token (Optional)</label>
+                    <input type="text" id="discovery_access_token" placeholder="Bearer token if discovery endpoint is protected">
+                    <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                        Some providers require authentication for discovery endpoints
+                    </small>
+                </div>
+            </div>
+            <div style="margin-top: 1rem;">
+                <button type="button" class="btn" id="discover-btn" onclick="discoverEndpoints()">
+                    🔍 Discover Endpoints
+                </button>
+            </div>
+            
+            <div id="discovery-results" style="display: none; margin-top: 1rem;">
+                <div class="discovery-success" style="background-color: #d4edda; border: 1px solid #c3e6cb; border-radius: 4px; padding: 1rem; margin-bottom: 1rem;">
+                    <div style="font-weight: 600; color: #155724; margin-bottom: 0.5rem;">✅ Discovery Successful</div>
+                    <div id="discovery-content" style="color: #155724; font-size: 0.9rem;"></div>
+                </div>
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-success" onclick="applyDiscoveredEndpoints()">
+                        Apply to DCR Form
+                    </button>
+                    <button type="button" class="btn" onclick="applyToAuthFlow()">
+                        Apply to Auth Flow
+                    </button>
+                </div>
+            </div>
+            
+            <div id="discovery-error" style="display: none; margin-top: 1rem;">
+                <div class="discovery-error-box" style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 1rem;">
+                    <div style="font-weight: 600; color: #721c24; margin-bottom: 0.5rem;">❌ Discovery Failed</div>
+                    <div id="discovery-error-content" style="color: #721c24; font-size: 0.9rem;"></div>
+                </div>
+            </div>
+            
+            <div id="discovery-loading" style="display: none; margin-top: 1rem;">
+                <div style="background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; padding: 1rem; color: #0c5460;">
+                    🔄 Discovering endpoints...
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="card">
+        <h2>Dynamic Client Registration (RFC 7591)</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">
+            Register a new OAuth 2.0 client dynamically with the authorization server. 
+            You can use auto-discovery above or manually configure the endpoints below.
+        </p>
+        
+        <form method="POST" action="/register-client" class="config-form" id="dcr-form">
+            <div class="form-sections">
+                <!-- DCR Endpoint Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">DCR Endpoint Configuration</h3>
+                    <div class="form-group full-width">
+                        <label for="registration_endpoint">Registration Endpoint URL *</label>
+                        <input type="url" id="registration_endpoint" name="registration_endpoint" 
+                               value="{{ config.registration_endpoint }}" required
+                               placeholder="https://your-auth-provider.com/oauth/register">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="initial_access_token">Initial Access Token (Optional)</label>
+                        <input type="text" id="initial_access_token" name="initial_access_token" 
+                               value="{{ config.initial_access_token }}"
+                               placeholder="Some providers require an initial access token">
+                        <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                            Required by some OAuth providers to authenticate registration requests
+                        </small>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="verify_ssl_dcr">SSL Verification</label>
+                        <select id="verify_ssl_dcr" name="verify_ssl_dcr">
+                            <option value="true" {{ 'selected' if config.verify_ssl else '' }}>Enabled (Recommended)</option>
+                            <option value="false" {{ 'selected' if not config.verify_ssl else '' }}>Disabled (Testing Only)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Client Metadata Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Client Metadata</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_name">Client Name *</label>
+                            <input type="text" id="client_name" name="client_name" required
+                                   placeholder="My Test Application">
+                        </div>
+                        <div class="form-group">
+                            <label for="token_endpoint_auth_method">Token Endpoint Auth Method *</label>
+                            <select id="token_endpoint_auth_method" name="token_endpoint_auth_method" required>
+                                <option value="none">none (Public Client)</option>
+                                <option value="client_secret_post" selected>client_secret_post</option>
+                                <option value="client_secret_basic">client_secret_basic</option>
+                                <option value="client_secret_jwt">client_secret_jwt</option>
+                                <option value="private_key_jwt">private_key_jwt</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="redirect_uris">Redirect URIs *</label>
+                        <div class="array-input-container" id="redirect_uris_container">
+                            <div class="array-input-row">
+                                <input type="url" name="redirect_uris[]" required placeholder="http://localhost:5002/callback">
+                                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+                            </div>
+                        </div>
+                        <button type="button" class="add-array-item-btn" onclick="addRedirectUri()">+ Add Redirect URI</button>
+                    </div>
+                </div>
+                
+                <!-- Grant Types and Response Types Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Grant Types & Response Types</h3>
+                    <div class="form-group full-width">
+                        <label for="grant_types">Grant Types (Select multiple)</label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="authorization_code" checked>
+                                authorization_code
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="refresh_token" checked>
+                                refresh_token
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="client_credentials">
+                                client_credentials
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="implicit">
+                                implicit
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="password">
+                                password
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="response_types">Response Types (Select multiple)</label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="code" checked>
+                                code
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="token">
+                                token
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="id_token">
+                                id_token
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="scope">Scope (Space-separated)</label>
+                        <input type="text" id="scope" name="scope" placeholder="openid profile email">
+                    </div>
+                </div>
+                
+                <!-- Optional Metadata Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Optional Client Metadata</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_uri">Client URI</label>
+                            <input type="url" id="client_uri" name="client_uri" placeholder="https://example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="logo_uri">Logo URI</label>
+                            <input type="url" id="logo_uri" name="logo_uri" placeholder="https://example.com/logo.png">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="policy_uri">Policy URI</label>
+                            <input type="url" id="policy_uri" name="policy_uri" placeholder="https://example.com/policy">
+                        </div>
+                        <div class="form-group">
+                            <label for="tos_uri">Terms of Service URI</label>
+                            <input type="url" id="tos_uri" name="tos_uri" placeholder="https://example.com/tos">
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="contacts">Contact Emails</label>
+                        <div class="array-input-container" id="contacts_container">
+                            <div class="array-input-row">
+                                <input type="email" name="contacts[]" placeholder="admin@example.com">
+                                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+                            </div>
+                        </div>
+                        <button type="button" class="add-array-item-btn" onclick="addContact()">+ Add Contact</button>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="software_statement">Software Statement (JWT)</label>
+                        <textarea id="software_statement" name="software_statement" placeholder="Optional JWT for software statement"></textarea>
+                        <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                            Some providers require a signed JWT containing client metadata
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">Register Client</button>
+                <button type="button" class="btn btn-secondary" onclick="resetDcrForm()">Reset Form</button>
+            </div>
+        </form>
+    </div>
+    
+    {% if registration_response %}
+    <div class="card">
+        <h2>Registration Response</h2>
+        <div class="response-container">
+            <div class="response-title">
+                {% if registration_response.success %}
+                    ✅ Client Registered Successfully
+                {% else %}
+                    ❌ Registration Failed
+                {% endif %}
+            </div>
+            
+            {% if registration_response.success %}
+                <div class="token-grid">
+                    <div class="token-item">
+                        <div class="token-label">Client ID</div>
+                        <div class="token-value">{{ registration_response.client_id }}</div>
+                    </div>
+                    {% if registration_response.client_secret %}
+                    <div class="token-item">
+                        <div class="token-label">Client Secret</div>
+                        <div class="token-value">{{ registration_response.client_secret }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.client_id_issued_at %}
+                    <div class="token-item">
+                        <div class="token-label">Issued At</div>
+                        <div class="token-value">{{ registration_response.client_id_issued_at }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.client_secret_expires_at %}
+                    <div class="token-item">
+                        <div class="token-label">Secret Expires At</div>
+                        <div class="token-value">{{ registration_response.client_secret_expires_at }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.registration_client_uri %}
+                    <div class="token-item">
+                        <div class="token-label">Registration Client URI</div>
+                        <div class="token-value">{{ registration_response.registration_client_uri }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.registration_access_token %}
+                    <div class="token-item">
+                        <div class="token-label">Registration Access Token</div>
+                        <div class="token-value">{{ registration_response.registration_access_token }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <button type="button" class="btn" onclick="copyRegistrationToAuthFlow('{{ registration_response.client_id }}', '{{ registration_response.client_secret or '' }}')">
+                        Copy to Authorization Flow
+                    </button>
+                </div>
+            {% endif %}
+            
+            <div style="margin-top: 1.5rem;">
+                <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Full Response:</h3>
+                <div class="json-display">{{ registration_response.raw_response }}</div>
+            </div>
+            
+            {% if registration_response.http_data %}
+            <div class="http-details-container">
+                <h3 style="color: #2c3e50; margin-bottom: 1rem;">HTTP Request/Response Details</h3>
+                
+                <div class="http-section">
+                    <div class="http-section-title">Request</div>
+                    <div class="http-content">
+                        <div class="http-line">{{ registration_response.http_data.request_method }} {{ registration_response.http_data.request_url }}</div>
+                        <div class="http-line">Headers:</div>
+                        <div class="http-json">{{ registration_response.http_data.request_headers }}</div>
+                        <div class="http-line">Body:</div>
+                        <div class="http-body">{{ registration_response.http_data.request_body }}</div>
+                    </div>
+                </div>
+                
+                <div class="http-section">
+                    <div class="http-section-title">Response</div>
+                    <div class="http-content">
+                        <div class="http-line">Status: {{ registration_response.http_data.response_status }}</div>
+                        <div class="http-line">Headers:</div>
+                        <div class="http-json">{{ registration_response.http_data.response_headers }}</div>
+                        <div class="http-line">Body:</div>
+                        <div class="http-body">{{ registration_response.http_data.response_body }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="card">
+        <h2>About Dynamic Client Registration</h2>
+        <p style="color: #6c757d; margin-bottom: 1rem;">
+            Dynamic Client Registration (DCR) is defined in RFC 7591 and allows clients to register with an 
+            OAuth 2.0 authorization server programmatically. This is particularly useful for:
+        </p>
+        <ul style="margin-left: 1.5rem; color: #495057;">
+            <li>Testing public clients (SPAs, mobile apps) that don't use client secrets</li>
+            <li>Automating client provisioning in development/testing environments</li>
+            <li>Creating temporary clients for integration testing</li>
+            <li>Understanding OAuth provider registration requirements</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+// Store discovered metadata globally
+let discoveredMetadata = null;
+
+async function discoverEndpoints() {
+    const issuerUrl = document.getElementById('discovery_issuer_url').value.trim();
+    const accessToken = document.getElementById('discovery_access_token').value.trim();
+    
+    if (!issuerUrl) {
+        alert('Please enter an issuer URL');
+        return;
+    }
+    
+    // Show loading, hide results/errors
+    document.getElementById('discovery-loading').style.display = 'block';
+    document.getElementById('discovery-results').style.display = 'none';
+    document.getElementById('discovery-error').style.display = 'none';
+    
+    try {
+        const requestBody = {
+            issuer_url: issuerUrl,
+            verify_ssl: document.getElementById('verify_ssl_dcr').value === 'true'
+        };
+        
+        // Add access token if provided
+        if (accessToken) {
+            requestBody.access_token = accessToken;
+        }
+        
+        const response = await fetch('/discover-endpoints', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(requestBody)
+        });
+        
+        const data = await response.json();
+        
+        // Hide loading
+        document.getElementById('discovery-loading').style.display = 'none';
+        
+        if (data.success) {
+            // Store the metadata
+            discoveredMetadata = data;
+            
+            // Display results
+            const content = document.getElementById('discovery-content');
+            let html = `<div style="margin-bottom: 0.5rem;"><strong>Discovered from:</strong> ${data.discovered_from}</div>`;
+            
+            if (data.issuer) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>Issuer:</strong> ${data.issuer}</div>`;
+            }
+            
+            if (data.registration_endpoint) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>✅ Registration Endpoint:</strong> ${data.registration_endpoint}</div>`;
+            } else {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>⚠️ Registration Endpoint:</strong> Not available (DCR not supported)</div>`;
+            }
+            
+            if (data.authorization_endpoint) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>Authorization Endpoint:</strong> ${data.authorization_endpoint}</div>`;
+            }
+            
+            if (data.token_endpoint) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>Token Endpoint:</strong> ${data.token_endpoint}</div>`;
+            }
+            
+            if (data.grant_types_supported && data.grant_types_supported.length > 0) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>Supported Grant Types:</strong> ${data.grant_types_supported.join(', ')}</div>`;
+            }
+            
+            if (data.token_endpoint_auth_methods_supported && data.token_endpoint_auth_methods_supported.length > 0) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>Supported Auth Methods:</strong> ${data.token_endpoint_auth_methods_supported.join(', ')}</div>`;
+            }
+            
+            content.innerHTML = html;
+            document.getElementById('discovery-results').style.display = 'block';
+        } else {
+            // Show error
+            document.getElementById('discovery-error-content').textContent = data.error || 'Discovery failed';
+            document.getElementById('discovery-error').style.display = 'block';
+        }
+    } catch (error) {
+        // Hide loading
+        document.getElementById('discovery-loading').style.display = 'none';
+        
+        // Show error
+        document.getElementById('discovery-error-content').textContent = `Error: ${error.message}`;
+        document.getElementById('discovery-error').style.display = 'block';
+    }
+}
+
+function applyDiscoveredEndpoints() {
+    if (!discoveredMetadata) {
+        alert('No discovered metadata to apply');
+        return;
+    }
+    
+    // Apply to DCR form
+    if (discoveredMetadata.registration_endpoint) {
+        document.getElementById('registration_endpoint').value = discoveredMetadata.registration_endpoint;
+    }
+    
+    // Pre-select supported auth methods if available
+    if (discoveredMetadata.token_endpoint_auth_methods_supported && 
+        discoveredMetadata.token_endpoint_auth_methods_supported.length > 0) {
+        const authMethodSelect = document.getElementById('token_endpoint_auth_method');
+        const supportedMethod = discoveredMetadata.token_endpoint_auth_methods_supported[0];
+        
+        // Try to find matching option
+        for (let option of authMethodSelect.options) {
+            if (option.value === supportedMethod) {
+                authMethodSelect.value = supportedMethod;
+                break;
+            }
+        }
+    }
+    
+    // Pre-select supported grant types
+    if (discoveredMetadata.grant_types_supported) {
+        const grantCheckboxes = document.querySelectorAll('input[name="grant_types"]');
+        grantCheckboxes.forEach(checkbox => {
+            checkbox.checked = discoveredMetadata.grant_types_supported.includes(checkbox.value);
+        });
+    }
+    
+    // Pre-select supported response types
+    if (discoveredMetadata.response_types_supported) {
+        const responseCheckboxes = document.querySelectorAll('input[name="response_types"]');
+        responseCheckboxes.forEach(checkbox => {
+            checkbox.checked = discoveredMetadata.response_types_supported.includes(checkbox.value);
+        });
+    }
+    
+    // Set default scope if available
+    if (discoveredMetadata.scopes_supported && discoveredMetadata.scopes_supported.length > 0) {
+        const commonScopes = ['openid', 'profile', 'email'];
+        const availableScopes = discoveredMetadata.scopes_supported.filter(s => commonScopes.includes(s));
+        if (availableScopes.length > 0) {
+            document.getElementById('scope').value = availableScopes.join(' ');
+        }
+    }
+    
+    // Scroll to the form
+    document.getElementById('dcr-form').scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    alert('✅ Discovered endpoints applied to DCR form! Review and adjust as needed.');
+}
+
+async function applyToAuthFlow() {
+    if (!discoveredMetadata) {
+        alert('No discovered metadata to apply');
+        return;
+    }
+    
+    if (!confirm('This will update the Authorization Flow configuration. Continue?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('/apply-discovery-to-config', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                authorization_endpoint: discoveredMetadata.authorization_endpoint,
+                token_endpoint: discoveredMetadata.token_endpoint,
+                scopes_supported: discoveredMetadata.scopes_supported || []
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✅ Endpoints applied to Authorization Flow! Switch to the Authorization Code Flow tab to use them.');
+        } else {
+            alert('❌ Failed to apply endpoints: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('❌ Error: ' + error.message);
+    }
+}
+
+async function copyRegistrationToAuthFlow(clientId, clientSecret) {
+    if (!confirm('This will copy the client credentials and discovered endpoints to Authorization Flow. Continue?')) {
+        return;
+    }
+    
+    try {
+        const payload = {
+            client_id: clientId,
+            client_secret: clientSecret
+        };
+        
+        // Also include discovered endpoints if available
+        if (discoveredMetadata) {
+            payload.authorization_endpoint = discoveredMetadata.authorization_endpoint;
+            payload.token_endpoint = discoveredMetadata.token_endpoint;
+        }
+        
+        const response = await fetch('/copy-to-auth-flow', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify(payload)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            let message = '✅ Client credentials copied to Authorization Flow!';
+            if (discoveredMetadata) {
+                message += '\n✅ Authorization and token endpoints also applied!';
+            }
+            alert(message + '\n\nSwitch to the Authorization Code Flow tab to test.');
+            
+            // Redirect to home page after a short delay
+            setTimeout(() => {
+                window.location.href = '/';
+            }, 1500);
+        } else {
+            alert('❌ Failed to copy: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('❌ Error: ' + error.message);
+    }
+}
+
+function addRedirectUri() {
+    const container = document.getElementById('redirect_uris_container');
+    const row = document.createElement('div');
+    row.className = 'array-input-row';
+    row.innerHTML = `
+        <input type="url" name="redirect_uris[]" placeholder="http://localhost:5002/callback">
+        <button type="button" onclick="removeArrayItem(this)">Remove</button>
+    `;
+    container.appendChild(row);
+    updateRemoveButtons('redirect_uris_container');
+}
+
+function addContact() {
+    const container = document.getElementById('contacts_container');
+    const row = document.createElement('div');
+    row.className = 'array-input-row';
+    row.innerHTML = `
+        <input type="email" name="contacts[]" placeholder="admin@example.com">
+        <button type="button" onclick="removeArrayItem(this)">Remove</button>
+    `;
+    container.appendChild(row);
+    updateRemoveButtons('contacts_container');
+}
+
+function removeArrayItem(button) {
+    const row = button.parentElement;
+    const container = row.parentElement;
+    row.remove();
+    updateRemoveButtons(container.id);
+}
+
+function updateRemoveButtons(containerId) {
+    const container = document.getElementById(containerId);
+    const rows = container.querySelectorAll('.array-input-row');
+    rows.forEach((row, index) => {
+        const button = row.querySelector('button');
+        if (rows.length === 1) {
+            button.style.display = 'none';
+        } else {
+            button.style.display = 'block';
+        }
+    });
+}
+
+function resetDcrForm() {
+    if (confirm('Are you sure you want to reset the form?')) {
+        document.getElementById('dcr-form').reset();
+        
+        // Reset redirect URIs to single input
+        const redirectContainer = document.getElementById('redirect_uris_container');
+        redirectContainer.innerHTML = `
+            <div class="array-input-row">
+                <input type="url" name="redirect_uris[]" required placeholder="http://localhost:5002/callback">
+                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+            </div>
+        `;
+        
+        // Reset contacts to single input
+        const contactsContainer = document.getElementById('contacts_container');
+        contactsContainer.innerHTML = `
+            <div class="array-input-row">
+                <input type="email" name="contacts[]" placeholder="admin@example.com">
+                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+            </div>
+        `;
+    }
+}
+</script>
+{% endblock %}

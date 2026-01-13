@@ -32,7 +32,10 @@ CONFIG = {
     'prompt': os.getenv('PROMPT', ''),
     'login_hint': os.getenv('LOGIN_HINT', ''),
     'nonce': os.getenv('NONCE', ''),
-    'verify_ssl': os.getenv('VERIFY_SSL', 'true').lower() in ('true', '1', 'yes', 'on')
+    'verify_ssl': os.getenv('VERIFY_SSL', 'true').lower() in ('true', '1', 'yes', 'on'),
+    # DCR Configuration
+    'registration_endpoint': os.getenv('REGISTRATION_ENDPOINT', 'https://your-auth-provider.com/oauth/register'),
+    'initial_access_token': os.getenv('INITIAL_ACCESS_TOKEN', '')
 }
 
 app = Flask(__name__)
@@ -40,6 +43,9 @@ app.secret_key = 'oauth-tester-secret-key'  # For flash messages
 
 # Store for PKCE and state (in production, use proper session storage)
 auth_state = {}
+
+# Store discovered metadata (in production, use proper session storage)
+discovered_metadata = {}
 
 
 def generate_pkce_pair():
@@ -474,10 +480,431 @@ def test_connectivity():
     }), 500
 
 
+@app.route('/apply-discovery-to-config', methods=['POST'])
+def apply_discovery_to_config():
+  """Apply discovered endpoints and scopes to Authorization Flow configuration"""
+  global CONFIG
+
+  try:
+    data = request.json
+    authorization_endpoint = data.get('authorization_endpoint')
+    token_endpoint = data.get('token_endpoint')
+    scopes_supported = data.get('scopes_supported', [])
+
+    if authorization_endpoint:
+      CONFIG['auth_url'] = authorization_endpoint
+      print(f"Updated authorization endpoint: {authorization_endpoint}")
+
+    if token_endpoint:
+      CONFIG['token_url'] = token_endpoint
+      print(f"Updated token endpoint: {token_endpoint}")
+    
+    if scopes_supported:
+      scopes = ' '.join(scopes_supported)
+      CONFIG['scopes'] = scopes
+      print(f"Updated scopes: {scopes}")
+
+    return jsonify({
+        'success': True,
+        'message': 'Configuration updated successfully'
+    })
+
+  except Exception as e:
+    print(f"Error applying discovery to config: {str(e)}")
+    return jsonify({
+        'success': False,
+        'error': str(e)
+    }), 500
+
+
 @app.route('/health')
 def health_check():
   """Simple health check endpoint"""
   return jsonify({"status": "healthy", "message": "OAuth tester is running"})
+
+
+@app.route('/dcr')
+def dcr_page():
+  """Dynamic Client Registration page"""
+  return render_template('dcr.html', config=CONFIG, registration_response=None)
+
+
+@app.route('/register-client', methods=['POST'])
+def register_client():
+  """Register a new OAuth client using Dynamic Client Registration (RFC 7591)"""
+  print("\n" + "="*50)
+  print("Dynamic Client Registration (DCR)")
+  print("="*50)
+
+  try:
+    # Get registration endpoint and access token
+    registration_endpoint = request.form.get('registration_endpoint')
+    initial_access_token = request.form.get('initial_access_token', '').strip()
+    verify_ssl = request.form.get('verify_ssl_dcr', 'true').lower() in ('true', '1', 'yes', 'on')
+
+    # Build client metadata
+    client_metadata = {
+        'client_name': request.form.get('client_name'),
+        'token_endpoint_auth_method': request.form.get('token_endpoint_auth_method')
+    }
+
+    # Get redirect URIs (array)
+    redirect_uris = request.form.getlist('redirect_uris[]')
+    redirect_uris = [uri for uri in redirect_uris if uri.strip()]
+    if redirect_uris:
+      client_metadata['redirect_uris'] = redirect_uris
+
+    # Get grant types (checkboxes)
+    grant_types = request.form.getlist('grant_types')
+    if grant_types:
+      client_metadata['grant_types'] = grant_types
+
+    # Get response types (checkboxes)
+    response_types = request.form.getlist('response_types')
+    if response_types:
+      client_metadata['response_types'] = response_types
+
+    # Get scope
+    scope = request.form.get('scope', '').strip()
+    if scope:
+      client_metadata['scope'] = scope
+
+    # Optional URIs
+    for field in ['client_uri', 'logo_uri', 'policy_uri', 'tos_uri']:
+      value = request.form.get(field, '').strip()
+      if value:
+        client_metadata[field] = value
+
+    # Get contacts (array)
+    contacts = request.form.getlist('contacts[]')
+    contacts = [contact for contact in contacts if contact.strip()]
+    if contacts:
+      client_metadata['contacts'] = contacts
+
+    # Software statement (JWT)
+    software_statement = request.form.get('software_statement', '').strip()
+    if software_statement:
+      client_metadata['software_statement'] = software_statement
+
+    print("Registration Endpoint:", registration_endpoint)
+    print("Client Metadata:")
+    print(json.dumps(client_metadata, indent=2))
+
+    # Prepare headers
+    headers = {
+        'Content-Type': 'application/json',
+        'Accept': 'application/json'
+    }
+
+    # Add initial access token if provided
+    if initial_access_token:
+      headers['Authorization'] = f'Bearer {initial_access_token}'
+      print("Using Initial Access Token")
+
+    # Make registration request
+    print(f"\nMaking registration request to: {registration_endpoint}")
+    print(f"SSL verification: {verify_ssl}")
+
+    response = requests.post(
+        registration_endpoint,
+        json=client_metadata,
+        headers=headers,
+        timeout=30,
+        verify=verify_ssl
+    )
+
+    print(f"\n✅ Registration request completed!")
+    print(f"Status: {response.status_code}")
+
+    # Prepare HTTP request/response data
+    request_body = response.request.body
+    if isinstance(request_body, bytes):
+      request_body = request_body.decode('utf-8')
+    elif request_body is None:
+      request_body = ''
+
+    http_data = {
+        'request_method': 'POST',
+        'request_url': registration_endpoint,
+        'request_headers': json.dumps(dict(response.request.headers), indent=2),
+        'request_body': request_body,
+        'response_status': response.status_code,
+        'response_headers': json.dumps(dict(response.headers), indent=2),
+        'response_body': response.text
+    }
+
+    if response.status_code in [200, 201]:
+      # Success
+      registration_data = response.json()
+      print("\nClient registered successfully:")
+      print(json.dumps(registration_data, indent=2))
+
+      registration_response = {
+          'success': True,
+          'client_id': registration_data.get('client_id'),
+          'client_secret': registration_data.get('client_secret'),
+          'client_id_issued_at': registration_data.get('client_id_issued_at'),
+          'client_secret_expires_at': registration_data.get('client_secret_expires_at'),
+          'registration_client_uri': registration_data.get('registration_client_uri'),
+          'registration_access_token': registration_data.get('registration_access_token'),
+          'raw_response': json.dumps(registration_data, indent=2),
+          'http_data': http_data
+      }
+
+      flash('Client registered successfully!', 'success')
+    else:
+      # Error
+      print(f"\n❌ Registration failed with status {response.status_code}")
+      try:
+        error_data = response.json()
+        print(json.dumps(error_data, indent=2))
+        error_message = json.dumps(error_data, indent=2)
+      except:
+        print(response.text)
+        error_message = response.text
+
+      registration_response = {
+          'success': False,
+          'raw_response': error_message,
+          'http_data': http_data
+      }
+
+      flash(f'Registration failed: {error_message}', 'error')
+
+    return render_template('dcr.html', config=CONFIG, registration_response=registration_response)
+
+  except requests.exceptions.Timeout:
+    print("\n❌ Registration request timed out")
+    flash('Registration request timed out', 'error')
+    return render_template('dcr.html', config=CONFIG, registration_response=None)
+  except requests.exceptions.ConnectionError as e:
+    print(f"\n❌ Connection error: {str(e)}")
+    flash(f'Connection error: {str(e)}', 'error')
+    return render_template('dcr.html', config=CONFIG, registration_response=None)
+  except Exception as e:
+    print(f"\n❌ Unexpected error: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    flash(f'Error: {str(e)}', 'error')
+    return render_template('dcr.html', config=CONFIG, registration_response=None)
+
+
+@app.route('/copy-to-auth-flow', methods=['POST'])
+def copy_to_auth_flow():
+  """Copy registered client credentials and endpoints to authorization flow configuration"""
+  global CONFIG
+  global discovered_metadata
+
+  try:
+    # Support both JSON and form data for backwards compatibility
+    if request.is_json:
+      data = request.json
+      client_id = data.get('client_id')
+      client_secret = data.get('client_secret', '')
+      authorization_endpoint = data.get('authorization_endpoint')
+      token_endpoint = data.get('token_endpoint')
+    else:
+      client_id = request.form.get('client_id')
+      client_secret = request.form.get('client_secret', '')
+      authorization_endpoint = None
+      token_endpoint = None
+
+    if not client_id:
+      if request.is_json:
+        return jsonify({
+            'success': False,
+            'error': 'No client ID provided'
+        }), 400
+      else:
+        flash('No client ID to copy', 'error')
+        return redirect('/')
+
+    # Update client credentials
+    CONFIG['client_id'] = client_id
+    print(f"Updated client_id: {client_id}")
+    
+    if client_secret:
+      CONFIG['client_secret'] = client_secret
+      print(f"Updated client_secret: ***")
+    
+    # Use discovered endpoints if not explicitly provided
+    if not authorization_endpoint and discovered_metadata.get('authorization_endpoint'):
+      authorization_endpoint = discovered_metadata.get('authorization_endpoint')
+      print(f"Using stored discovered authorization endpoint")
+    
+    if not token_endpoint and discovered_metadata.get('token_endpoint'):
+      token_endpoint = discovered_metadata.get('token_endpoint')
+      print(f"Using stored discovered token endpoint")
+    
+    # Update endpoints
+    endpoints_updated = False
+    if authorization_endpoint:
+      CONFIG['auth_url'] = authorization_endpoint
+      print(f"Updated authorization endpoint: {authorization_endpoint}")
+      endpoints_updated = True
+    
+    if token_endpoint:
+      CONFIG['token_url'] = token_endpoint
+      print(f"Updated token endpoint: {token_endpoint}")
+      endpoints_updated = True
+    
+    # Update scopes with discovered scopes if available
+    scopes_updated = False
+    if discovered_metadata.get('scopes_supported'):
+      scopes = ' '.join(discovered_metadata.get('scopes_supported'))
+      CONFIG['scopes'] = scopes
+      print(f"Updated scopes from discovery: {scopes}")
+      scopes_updated = True
+    
+    if request.is_json:
+      message = 'Client credentials copied successfully'
+      if endpoints_updated:
+        message += ' and endpoints updated'
+      if scopes_updated:
+        message += ' and scopes updated'
+      return jsonify({
+          'success': True,
+          'message': message,
+          'updated_endpoints': endpoints_updated,
+          'updated_scopes': scopes_updated
+      })
+    else:
+      message = 'Client credentials copied to Authorization Flow!'
+      if endpoints_updated:
+        message += ' Endpoints also updated!'
+      if scopes_updated:
+        message += ' Scopes also updated!'
+      flash(message, 'success')
+      return redirect('/')
+
+  except Exception as e:
+    print(f"Error copying to auth flow: {str(e)}")
+    if request.is_json:
+      return jsonify({
+          'success': False,
+          'error': str(e)
+      }), 500
+    else:
+      flash(f'Error copying credentials: {str(e)}', 'error')
+      return redirect('/')
+
+
+@app.route('/discover-endpoints', methods=['POST'])
+def discover_endpoints():
+  """Discover OAuth/OIDC endpoints from issuer URL (RFC 8414 / OIDC Discovery)"""
+  print("\n" + "="*50)
+  print("OAuth/OIDC Endpoint Discovery")
+  print("="*50)
+
+  try:
+    issuer_url = request.json.get('issuer_url', '').strip().rstrip('/')
+    verify_ssl = request.json.get('verify_ssl', True)
+    access_token = request.json.get('access_token', '').strip()
+
+    if not issuer_url:
+      return jsonify({
+          'success': False,
+          'error': 'Issuer URL is required'
+      }), 400
+
+    print(f"Issuer URL: {issuer_url}")
+    print(f"SSL Verification: {verify_ssl}")
+    print(f"Access Token Provided: {bool(access_token)}")
+
+    # Prepare headers
+    headers = {'Accept': 'application/json'}
+    if access_token:
+      headers['Authorization'] = f'Bearer {access_token}'
+      print("Using Bearer token for discovery")
+
+    # Try both standard discovery endpoints
+    discovery_endpoints = [
+        f"{issuer_url}/.well-known/openid-configuration",
+        f"{issuer_url}/.well-known/oauth-authorization-server",
+        f"{issuer_url}/.well-known/oauth-protected-resource"
+    ]
+
+    metadata = None
+    discovered_from = None
+    last_error = None
+
+    for discovery_url in discovery_endpoints:
+      try:
+        print(f"\nTrying discovery endpoint: {discovery_url}")
+        response = requests.get(
+            discovery_url,
+            timeout=10,
+            verify=verify_ssl,
+            headers=headers
+        )
+
+        if response.status_code == 200:
+          metadata = response.json()
+          discovered_from = discovery_url
+          print(f"✅ Discovery successful from: {discovery_url}")
+          break
+        elif response.status_code == 401:
+          print(f"❌ Discovery failed with status: 401 (Unauthorized)")
+          last_error = "Discovery endpoint requires authentication. Please provide an access token."
+          # Check if response has WWW-Authenticate header with hints
+          auth_header = response.headers.get('WWW-Authenticate', '')
+          if auth_header:
+            print(f"WWW-Authenticate: {auth_header}")
+        else:
+          print(f"❌ Discovery failed with status: {response.status_code}")
+          last_error = f"HTTP {response.status_code}: {response.text[:200]}"
+      except requests.exceptions.RequestException as e:
+        print(f"❌ Discovery failed: {str(e)}")
+        last_error = str(e)
+        continue
+
+    if metadata:
+      # Extract relevant endpoints
+      discovered_data = {
+          'success': True,
+          'discovered_from': discovered_from,
+          'issuer': metadata.get('issuer'),
+          'authorization_endpoint': metadata.get('authorization_endpoint'),
+          'token_endpoint': metadata.get('token_endpoint'),
+          'registration_endpoint': metadata.get('registration_endpoint'),
+          'userinfo_endpoint': metadata.get('userinfo_endpoint'),
+          'jwks_uri': metadata.get('jwks_uri'),
+          'scopes_supported': metadata.get('scopes_supported', []),
+          'response_types_supported': metadata.get('response_types_supported', []),
+          'grant_types_supported': metadata.get('grant_types_supported', []),
+          'token_endpoint_auth_methods_supported': metadata.get('token_endpoint_auth_methods_supported', []),
+          'registration_endpoint_available': bool(metadata.get('registration_endpoint'))
+      }
+
+      # Store discovered metadata in backend for later use
+      global discovered_metadata
+      discovered_metadata = {
+          'authorization_endpoint': metadata.get('authorization_endpoint'),
+          'token_endpoint': metadata.get('token_endpoint'),
+          'scopes_supported': metadata.get('scopes_supported', [])
+      }
+      print(f"\n📝 Stored discovered endpoints and scopes in backend for later use")
+
+      print("\nDiscovered metadata:")
+      print(json.dumps(discovered_data, indent=2))
+
+      return jsonify(discovered_data)
+    else:
+      print("\n❌ Discovery failed on all endpoints")
+      error_message = last_error if last_error else 'Could not discover endpoints. Provider may not support auto-discovery (RFC 8414/OIDC Discovery).'
+      return jsonify({
+          'success': False,
+          'error': error_message
+      }), 404
+
+  except Exception as e:
+    print(f"\n❌ Discovery error: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    return jsonify({
+        'success': False,
+        'error': str(e)
+    }), 500
 
 
 if __name__ == '__main__':
