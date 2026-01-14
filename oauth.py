@@ -24,7 +24,7 @@ CONFIG = {
     'client_id': os.getenv('CLIENT_ID', 'your-client-id'),
     'client_secret': os.getenv('CLIENT_SECRET', 'your-client-secret'),
     'scopes': os.getenv('SCOPES', 'refresh_token'),  # Space-separated scopes
-    'redirect_uri': os.getenv('REDIRECT_URI', 'http://localhost:5002/callback'),
+    'redirect_uri': os.getenv('REDIRECT_URI', 'http://localhost:5001/callback'),
     'use_pkce': os.getenv('USE_PKCE', 'true').lower() in ('true', '1', 'yes', 'on'),
     'client_auth_method': os.getenv('CLIENT_AUTH_METHOD', 'client_secret_post'),  # client_secret_post or client_secret_basic
     # Additional OAuth parameters for specific providers (like Snowflake)
@@ -911,8 +911,8 @@ if __name__ == '__main__':
   print("=" * 60)
   print("OAuth 2.0 Authorization Code Flow Tester Started")
   print("=" * 60)
-  print("Server running on http://localhost:5002")
-  print("Open your browser and go to: http://localhost:5002")
+  print("Server running on http://localhost:5001")
+  print("Open your browser and go to: http://localhost:5001")
   print("\nConfiguration loaded from environment variables:")
   print(f"- Authorization URL: {CONFIG['auth_url']}")
   print(f"- Token URL: {CONFIG['token_url']}")
@@ -928,7 +928,7 @@ if __name__ == '__main__':
   try:
     app.run(
         host='0.0.0.0',
-        port=5002,
+        port=5001,
         debug=True,
         use_reloader=False
     )

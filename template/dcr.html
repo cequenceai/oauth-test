@@ -1,0 +1,378 @@
+{% extends "base.html" %}
+
+{% block title %}Dynamic Client Registration - OAuth 2.0 Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>OAuth 2.0 Flow Tester</h1>
+        <p>Debug and test OAuth authorization flows step by step</p>
+    </div>
+    
+    <div class="tab-navigation">
+        <a href="/" class="tab-link">Authorization Code Flow</a>
+        <a href="/dcr" class="tab-link active">Dynamic Client Registration</a>
+    </div>
+    
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'success' if category == 'success' else 'error' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+    
+    <div class="card">
+        <h2>Dynamic Client Registration (RFC 7591)</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">
+            Register a new OAuth 2.0 client dynamically with the authorization server. 
+            This is useful for testing public clients (no secret) or obtaining client credentials programmatically.
+        </p>
+        
+        <form method="POST" action="/register-client" class="config-form" id="dcr-form">
+            <div class="form-sections">
+                <!-- DCR Endpoint Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">DCR Endpoint Configuration</h3>
+                    <div class="form-group full-width">
+                        <label for="registration_endpoint">Registration Endpoint URL *</label>
+                        <input type="url" id="registration_endpoint" name="registration_endpoint" 
+                               value="{{ config.registration_endpoint }}" required
+                               placeholder="https://your-auth-provider.com/oauth/register">
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="initial_access_token">Initial Access Token (Optional)</label>
+                        <input type="text" id="initial_access_token" name="initial_access_token" 
+                               value="{{ config.initial_access_token }}"
+                               placeholder="Some providers require an initial access token">
+                        <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                            Required by some OAuth providers to authenticate registration requests
+                        </small>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="verify_ssl_dcr">SSL Verification</label>
+                        <select id="verify_ssl_dcr" name="verify_ssl_dcr">
+                            <option value="true" {{ 'selected' if config.verify_ssl else '' }}>Enabled (Recommended)</option>
+                            <option value="false" {{ 'selected' if not config.verify_ssl else '' }}>Disabled (Testing Only)</option>
+                        </select>
+                    </div>
+                </div>
+                
+                <!-- Client Metadata Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Client Metadata</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_name">Client Name *</label>
+                            <input type="text" id="client_name" name="client_name" required
+                                   placeholder="My Test Application">
+                        </div>
+                        <div class="form-group">
+                            <label for="token_endpoint_auth_method">Token Endpoint Auth Method *</label>
+                            <select id="token_endpoint_auth_method" name="token_endpoint_auth_method" required>
+                                <option value="none">none (Public Client)</option>
+                                <option value="client_secret_post" selected>client_secret_post</option>
+                                <option value="client_secret_basic">client_secret_basic</option>
+                                <option value="client_secret_jwt">client_secret_jwt</option>
+                                <option value="private_key_jwt">private_key_jwt</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="redirect_uris">Redirect URIs *</label>
+                        <div class="array-input-container" id="redirect_uris_container">
+                            <div class="array-input-row">
+                                <input type="url" name="redirect_uris[]" required placeholder="http://localhost:5002/callback">
+                                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+                            </div>
+                        </div>
+                        <button type="button" class="add-array-item-btn" onclick="addRedirectUri()">+ Add Redirect URI</button>
+                    </div>
+                </div>
+                
+                <!-- Grant Types and Response Types Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Grant Types & Response Types</h3>
+                    <div class="form-group full-width">
+                        <label for="grant_types">Grant Types (Select multiple)</label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="authorization_code" checked>
+                                authorization_code
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="refresh_token" checked>
+                                refresh_token
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="client_credentials">
+                                client_credentials
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="implicit">
+                                implicit
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="grant_types" value="password">
+                                password
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="response_types">Response Types (Select multiple)</label>
+                        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.5rem; margin-top: 0.5rem;">
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="code" checked>
+                                code
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="token">
+                                token
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 0.5rem; font-weight: normal;">
+                                <input type="checkbox" name="response_types" value="id_token">
+                                id_token
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="form-group full-width">
+                        <label for="scope">Scope (Space-separated)</label>
+                        <input type="text" id="scope" name="scope" placeholder="openid profile email">
+                    </div>
+                </div>
+                
+                <!-- Optional Metadata Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Optional Client Metadata</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="client_uri">Client URI</label>
+                            <input type="url" id="client_uri" name="client_uri" placeholder="https://example.com">
+                        </div>
+                        <div class="form-group">
+                            <label for="logo_uri">Logo URI</label>
+                            <input type="url" id="logo_uri" name="logo_uri" placeholder="https://example.com/logo.png">
+                        </div>
+                    </div>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="policy_uri">Policy URI</label>
+                            <input type="url" id="policy_uri" name="policy_uri" placeholder="https://example.com/policy">
+                        </div>
+                        <div class="form-group">
+                            <label for="tos_uri">Terms of Service URI</label>
+                            <input type="url" id="tos_uri" name="tos_uri" placeholder="https://example.com/tos">
+                        </div>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="contacts">Contact Emails</label>
+                        <div class="array-input-container" id="contacts_container">
+                            <div class="array-input-row">
+                                <input type="email" name="contacts[]" placeholder="admin@example.com">
+                                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+                            </div>
+                        </div>
+                        <button type="button" class="add-array-item-btn" onclick="addContact()">+ Add Contact</button>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="software_statement">Software Statement (JWT)</label>
+                        <textarea id="software_statement" name="software_statement" placeholder="Optional JWT for software statement"></textarea>
+                        <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                            Some providers require a signed JWT containing client metadata
+                        </small>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button type="submit" class="btn btn-success">Register Client</button>
+                <button type="button" class="btn btn-secondary" onclick="resetDcrForm()">Reset Form</button>
+            </div>
+        </form>
+    </div>
+    
+    {% if registration_response %}
+    <div class="card">
+        <h2>Registration Response</h2>
+        <div class="response-container">
+            <div class="response-title">
+                {% if registration_response.success %}
+                    ✅ Client Registered Successfully
+                {% else %}
+                    ❌ Registration Failed
+                {% endif %}
+            </div>
+            
+            {% if registration_response.success %}
+                <div class="token-grid">
+                    <div class="token-item">
+                        <div class="token-label">Client ID</div>
+                        <div class="token-value">{{ registration_response.client_id }}</div>
+                    </div>
+                    {% if registration_response.client_secret %}
+                    <div class="token-item">
+                        <div class="token-label">Client Secret</div>
+                        <div class="token-value">{{ registration_response.client_secret }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.client_id_issued_at %}
+                    <div class="token-item">
+                        <div class="token-label">Issued At</div>
+                        <div class="token-value">{{ registration_response.client_id_issued_at }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.client_secret_expires_at %}
+                    <div class="token-item">
+                        <div class="token-label">Secret Expires At</div>
+                        <div class="token-value">{{ registration_response.client_secret_expires_at }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.registration_client_uri %}
+                    <div class="token-item">
+                        <div class="token-label">Registration Client URI</div>
+                        <div class="token-value">{{ registration_response.registration_client_uri }}</div>
+                    </div>
+                    {% endif %}
+                    {% if registration_response.registration_access_token %}
+                    <div class="token-item">
+                        <div class="token-label">Registration Access Token</div>
+                        <div class="token-value">{{ registration_response.registration_access_token }}</div>
+                    </div>
+                    {% endif %}
+                </div>
+                
+                <div style="margin-top: 1.5rem; text-align: center;">
+                    <form method="POST" action="/copy-to-auth-flow" style="display: inline;">
+                        <input type="hidden" name="client_id" value="{{ registration_response.client_id }}">
+                        <input type="hidden" name="client_secret" value="{{ registration_response.client_secret or '' }}">
+                        <button type="submit" class="btn">Copy to Authorization Flow</button>
+                    </form>
+                </div>
+            {% endif %}
+            
+            <div style="margin-top: 1.5rem;">
+                <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Full Response:</h3>
+                <div class="json-display">{{ registration_response.raw_response }}</div>
+            </div>
+            
+            {% if registration_response.http_data %}
+            <div class="http-details-container">
+                <h3 style="color: #2c3e50; margin-bottom: 1rem;">HTTP Request/Response Details</h3>
+                
+                <div class="http-section">
+                    <div class="http-section-title">Request</div>
+                    <div class="http-content">
+                        <div class="http-line">{{ registration_response.http_data.request_method }} {{ registration_response.http_data.request_url }}</div>
+                        <div class="http-line">Headers:</div>
+                        <div class="http-json">{{ registration_response.http_data.request_headers }}</div>
+                        <div class="http-line">Body:</div>
+                        <div class="http-body">{{ registration_response.http_data.request_body }}</div>
+                    </div>
+                </div>
+                
+                <div class="http-section">
+                    <div class="http-section-title">Response</div>
+                    <div class="http-content">
+                        <div class="http-line">Status: {{ registration_response.http_data.response_status }}</div>
+                        <div class="http-line">Headers:</div>
+                        <div class="http-json">{{ registration_response.http_data.response_headers }}</div>
+                        <div class="http-line">Body:</div>
+                        <div class="http-body">{{ registration_response.http_data.response_body }}</div>
+                    </div>
+                </div>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    
+    <div class="card">
+        <h2>About Dynamic Client Registration</h2>
+        <p style="color: #6c757d; margin-bottom: 1rem;">
+            Dynamic Client Registration (DCR) is defined in RFC 7591 and allows clients to register with an 
+            OAuth 2.0 authorization server programmatically. This is particularly useful for:
+        </p>
+        <ul style="margin-left: 1.5rem; color: #495057;">
+            <li>Testing public clients (SPAs, mobile apps) that don't use client secrets</li>
+            <li>Automating client provisioning in development/testing environments</li>
+            <li>Creating temporary clients for integration testing</li>
+            <li>Understanding OAuth provider registration requirements</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+function addRedirectUri() {
+    const container = document.getElementById('redirect_uris_container');
+    const row = document.createElement('div');
+    row.className = 'array-input-row';
+    row.innerHTML = `
+        <input type="url" name="redirect_uris[]" placeholder="http://localhost:5002/callback">
+        <button type="button" onclick="removeArrayItem(this)">Remove</button>
+    `;
+    container.appendChild(row);
+    updateRemoveButtons('redirect_uris_container');
+}
+
+function addContact() {
+    const container = document.getElementById('contacts_container');
+    const row = document.createElement('div');
+    row.className = 'array-input-row';
+    row.innerHTML = `
+        <input type="email" name="contacts[]" placeholder="admin@example.com">
+        <button type="button" onclick="removeArrayItem(this)">Remove</button>
+    `;
+    container.appendChild(row);
+    updateRemoveButtons('contacts_container');
+}
+
+function removeArrayItem(button) {
+    const row = button.parentElement;
+    const container = row.parentElement;
+    row.remove();
+    updateRemoveButtons(container.id);
+}
+
+function updateRemoveButtons(containerId) {
+    const container = document.getElementById(containerId);
+    const rows = container.querySelectorAll('.array-input-row');
+    rows.forEach((row, index) => {
+        const button = row.querySelector('button');
+        if (rows.length === 1) {
+            button.style.display = 'none';
+        } else {
+            button.style.display = 'block';
+        }
+    });
+}
+
+function resetDcrForm() {
+    if (confirm('Are you sure you want to reset the form?')) {
+        document.getElementById('dcr-form').reset();
+        
+        // Reset redirect URIs to single input
+        const redirectContainer = document.getElementById('redirect_uris_container');
+        redirectContainer.innerHTML = `
+            <div class="array-input-row">
+                <input type="url" name="redirect_uris[]" required placeholder="http://localhost:5002/callback">
+                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+            </div>
+        `;
+        
+        // Reset contacts to single input
+        const contactsContainer = document.getElementById('contacts_container');
+        contactsContainer.innerHTML = `
+            <div class="array-input-row">
+                <input type="email" name="contacts[]" placeholder="admin@example.com">
+                <button type="button" onclick="removeArrayItem(this)" style="display:none;">Remove</button>
+            </div>
+        `;
+    }
+}
+</script>
+{% endblock %}
