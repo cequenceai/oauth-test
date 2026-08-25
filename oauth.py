@@ -22,7 +22,7 @@ CONFIG = {
     'auth_url': os.getenv('AUTHORIZATION_URL', 'https://your-auth-provider.com/oauth/authorize'),
     'token_url': os.getenv('TOKEN_URL', 'https://your-auth-provider.com/oauth/token'),
     'client_id': os.getenv('CLIENT_ID', 'your-client-id'),
-    'client_secret': os.getenv('CLIENT_SECRET', 'your-client-secret'),
+    'client_secret': os.getenv('CLIENT_SECRET', ''),  # Optional - leave empty for public clients
     'scopes': os.getenv('SCOPES', 'refresh_token'),  # Space-separated scopes
     'redirect_uri': os.getenv('REDIRECT_URI', 'http://localhost:5001/callback'),
     'use_pkce': os.getenv('USE_PKCE', 'true').lower() in ('true', '1', 'yes', 'on'),
@@ -32,6 +32,9 @@ CONFIG = {
     'prompt': os.getenv('PROMPT', ''),
     'login_hint': os.getenv('LOGIN_HINT', ''),
     'nonce': os.getenv('NONCE', ''),
+    # Custom request parameters, one key=value per line (e.g. resource=https://...)
+    'auth_extra_params': os.getenv('AUTH_EXTRA_PARAMS', ''),
+    'token_extra_params': os.getenv('TOKEN_EXTRA_PARAMS', ''),
     'verify_ssl': os.getenv('VERIFY_SSL', 'true').lower() in ('true', '1', 'yes', 'on'),
     # DCR Configuration
     'registration_endpoint': os.getenv('REGISTRATION_ENDPOINT', 'https://your-auth-provider.com/oauth/register'),
@@ -56,6 +59,35 @@ def generate_pkce_pair():
       hashlib.sha256(code_verifier.encode('utf-8')).digest()
   ).decode('utf-8').rstrip('=')
   return code_verifier, code_challenge
+
+
+def parse_extra_params(raw):
+  """Parse custom request params from a raw string, one key=value per line.
+  Values may contain '=' (only the first one splits) so URLs work as-is."""
+  params = {}
+  for line in (raw or '').splitlines():
+    line = line.strip()
+    if not line or line.startswith('#'):
+      continue
+    if '=' not in line:
+      print(f"⚠️  Ignoring malformed extra param (expected key=value): {line}")
+      continue
+    key, value = line.split('=', 1)
+    key = key.strip()
+    if key:
+      params[key] = value.strip()
+  return params
+
+
+def apply_extra_params(params, raw, label):
+  """Merge parsed extra params into a request param dict, without letting
+  them clobber core protocol parameters that are already set."""
+  for key, value in parse_extra_params(raw).items():
+    if key in params:
+      print(f"⚠️  Extra {label} param '{key}' conflicts with a core parameter - skipping")
+      continue
+    params[key] = value
+    print(f"Added extra {label} param: {key}={value}")
 
 
 def render_error_page(error_icon, error_title, error_message, action_text="Try Again", http_data=None):
@@ -84,8 +116,8 @@ def update_config():
     CONFIG['auth_url'] = request.form.get('auth_url', CONFIG['auth_url'])
     CONFIG['token_url'] = request.form.get('token_url', CONFIG['token_url'])
     CONFIG['client_id'] = request.form.get('client_id', CONFIG['client_id'])
-    CONFIG['client_secret'] = request.form.get(
-        'client_secret', CONFIG['client_secret'])
+    # Client secret is optional - an empty value clears it (public client)
+    CONFIG['client_secret'] = request.form.get('client_secret', '').strip()
     CONFIG['scopes'] = request.form.get('scopes', CONFIG['scopes'])
     CONFIG['redirect_uri'] = request.form.get(
         'redirect_uri', CONFIG['redirect_uri'])
@@ -99,6 +131,8 @@ def update_config():
     CONFIG['prompt'] = request.form.get('prompt', '')
     CONFIG['login_hint'] = request.form.get('login_hint', '')
     CONFIG['nonce'] = request.form.get('nonce', '')
+    CONFIG['auth_extra_params'] = request.form.get('auth_extra_params', '').strip()
+    CONFIG['token_extra_params'] = request.form.get('token_extra_params', '').strip()
 
     flash('Configuration updated successfully!', 'success')
 
@@ -169,6 +203,9 @@ def start_auth():
     print(f"Generated code challenge: {code_challenge}")
   else:
     print("PKCE disabled - using traditional client secret authentication")
+
+  # Add custom params configured for the authorization endpoint (e.g. resource=...)
+  apply_extra_params(auth_params, CONFIG['auth_extra_params'], 'authorization')
 
   # Build the URL with proper encoding
   query_string = urllib.parse.urlencode(auth_params)
@@ -257,7 +294,7 @@ def exchange_code_for_tokens(code):
       'Accept': 'application/json'
   }
 
-  if auth_method == 'client_secret_basic':
+  if auth_method == 'client_secret_basic' and CONFIG['client_secret']:
     # client_secret_basic: Use HTTP Basic Authentication
     # Encode client_id:client_secret as Base64 and send in Authorization header
     credentials = f"{CONFIG['client_id']}:{CONFIG['client_secret']}"
@@ -265,10 +302,16 @@ def exchange_code_for_tokens(code):
     headers['Authorization'] = f'Basic {encoded_credentials}'
     print("Using client_secret_basic: credentials in Authorization header")
   else:
-    # client_secret_post: Send credentials in request body (default)
+    # client_secret_post (default): send credentials in request body.
+    # Client secret is optional - public clients (e.g. PKCE-only) omit it.
+    if auth_method == 'client_secret_basic':
+      print("⚠️  client_secret_basic selected but no client secret configured - sending client_id in body instead")
     token_params['client_id'] = CONFIG['client_id']
-    token_params['client_secret'] = CONFIG['client_secret']
-    print("Using client_secret_post: credentials in request body")
+    if CONFIG['client_secret']:
+      token_params['client_secret'] = CONFIG['client_secret']
+      print("Using client_secret_post: credentials in request body")
+    else:
+      print("No client secret configured - sending client_id only (public client)")
 
   # Add PKCE code verifier if PKCE is enabled
   if CONFIG['use_pkce']:
@@ -276,6 +319,9 @@ def exchange_code_for_tokens(code):
     print("Using PKCE code verifier for token exchange")
   else:
     print("Using traditional client secret authentication (no PKCE)")
+
+  # Add custom params configured for the token endpoint (e.g. resource=...)
+  apply_extra_params(token_params, CONFIG['token_extra_params'], 'token')
 
   # Log parameters (without exposing client secret)
   log_params = token_params.copy()
@@ -917,11 +963,16 @@ if __name__ == '__main__':
   print(f"- Authorization URL: {CONFIG['auth_url']}")
   print(f"- Token URL: {CONFIG['token_url']}")
   print(f"- Client ID: {CONFIG['client_id']}")
+  print(f"- Client Secret: {'(set)' if CONFIG['client_secret'] else '(not set - public client)'}")
   print(f"- Scopes: {CONFIG['scopes']}")
   print(f"- Redirect URI: {CONFIG['redirect_uri']}")
   print(f"- PKCE Enabled: {CONFIG['use_pkce']}")
   print(f"- Client Auth Method: {CONFIG['client_auth_method']}")
   print(f"- SSL Verification: {'Enabled' if CONFIG['verify_ssl'] else 'Disabled'}")
+  if CONFIG['auth_extra_params']:
+    print(f"- Extra Auth Params: {parse_extra_params(CONFIG['auth_extra_params'])}")
+  if CONFIG['token_extra_params']:
+    print(f"- Extra Token Params: {parse_extra_params(CONFIG['token_extra_params'])}")
   print("\nMake sure your .env file is properly configured!")
   print("=" * 60)
 

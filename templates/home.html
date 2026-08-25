@@ -59,8 +59,11 @@
                             <input type="text" id="client_id" name="client_id" value="{{ config.client_id }}" required>
                         </div>
                         <div class="form-group">
-                            <label for="client_secret">Client Secret</label>
-                            <input type="password" id="client_secret" name="client_secret" value="{{ config.client_secret }}" required>
+                            <label for="client_secret">Client Secret <span style="color: #6c757d; font-weight: normal;">(optional)</span></label>
+                            <input type="password" id="client_secret" name="client_secret" value="{{ config.client_secret }}" placeholder="Leave empty for public clients (PKCE-only)">
+                            <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                                Leave empty for public clients - the secret will be omitted from the token request
+                            </small>
                         </div>
                     </div>
                 </div>
@@ -129,6 +132,22 @@
                             <label for="nonce">Nonce</label>
                             <input type="text" id="nonce" name="nonce" value="{{ config.nonce }}" placeholder="e.g., 1599046102647-dv4">
                         </div>
+                    </div>
+                </div>
+
+                <!-- Custom Request Parameters Section -->
+                <div class="form-section">
+                    <h3 class="form-section-title">Custom Request Parameters</h3>
+                    <p style="margin-bottom: 1rem; color: #6c757d; font-size: 0.875rem;">
+                        Add arbitrary parameters to the authorization and/or token requests (e.g. <code>resource</code>, <code>audience</code>). One <code>key=value</code> per line.
+                    </p>
+                    <div class="form-group full-width">
+                        <label for="auth_extra_params">Extra Authorization Endpoint Params</label>
+                        <textarea id="auth_extra_params" name="auth_extra_params" rows="3" placeholder="resource=https://aws-mcp.us-east-1.api.aws/mcp&#10;audience=my-api">{{ config.auth_extra_params }}</textarea>
+                    </div>
+                    <div class="form-group full-width">
+                        <label for="token_extra_params">Extra Token Endpoint Params</label>
+                        <textarea id="token_extra_params" name="token_extra_params" rows="3" placeholder="resource=https://aws-mcp.us-east-1.api.aws/mcp">{{ config.token_extra_params }}</textarea>
                     </div>
                 </div>
             </div>
@@ -205,6 +224,18 @@
                     <div class="config-item">
                         <div class="config-label">Nonce</div>
                         <div class="config-value">{{ config.nonce }}</div>
+                    </div>
+                    {% endif %}
+                    {% if config.auth_extra_params %}
+                    <div class="config-item">
+                        <div class="config-label">Extra Auth Params</div>
+                        <div class="config-value" style="white-space: pre-line;">{{ config.auth_extra_params }}</div>
+                    </div>
+                    {% endif %}
+                    {% if config.token_extra_params %}
+                    <div class="config-item">
+                        <div class="config-label">Extra Token Params</div>
+                        <div class="config-value" style="white-space: pre-line;">{{ config.token_extra_params }}</div>
                     </div>
                     {% endif %}
         </div>
