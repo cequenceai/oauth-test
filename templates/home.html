@@ -12,6 +12,7 @@
     <div class="tab-navigation">
         <a href="/" class="tab-link active">Authorization Code Flow</a>
         <a href="/dcr" class="tab-link">Dynamic Client Registration</a>
+        <a href="/cimd" class="tab-link">CIMD</a>
     </div>
     
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -100,6 +101,7 @@
                             <select id="client_auth_method" name="client_auth_method">
                                 <option value="client_secret_post" {{ 'selected' if config.client_auth_method == 'client_secret_post' else '' }}>client_secret_post (Body)</option>
                                 <option value="client_secret_basic" {{ 'selected' if config.client_auth_method == 'client_secret_basic' else '' }}>client_secret_basic (Basic Auth)</option>
+                                <option value="none" {{ 'selected' if config.client_auth_method == 'none' else '' }}>none (Public Client / CIMD)</option>
                             </select>
                         </div>
                         <div class="form-group">

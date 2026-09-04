@@ -1,0 +1,269 @@
+{% extends "base.html" %}
+
+{% block title %}Client ID Metadata Documents - OAuth 2.0 Flow Tester{% endblock %}
+
+{% block content %}
+<div class="container">
+    <div class="header">
+        <h1>OAuth 2.0 Flow Tester</h1>
+        <p>Debug and test OAuth authorization flows step by step</p>
+    </div>
+
+    <div class="tab-navigation">
+        <a href="/" class="tab-link">Authorization Code Flow</a>
+        <a href="/dcr" class="tab-link">Dynamic Client Registration</a>
+        <a href="/cimd" class="tab-link active">CIMD</a>
+    </div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+            {% for category, message in messages %}
+                <div class="alert alert-{{ 'success' if category == 'success' else 'error' }}">
+                    {{ message }}
+                </div>
+            {% endfor %}
+        {% endif %}
+    {% endwith %}
+
+    <div class="card">
+        <h2>Your Client Metadata Document</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">
+            With CIMD, the <code>client_id</code> is an HTTPS URL that the authorization server fetches to
+            learn your client's metadata - no registration needed. This tester serves its own document at the
+            URL below, built from your current Authorization Flow configuration.
+        </p>
+
+        <form method="POST" action="/update-cimd-config" class="config-form">
+            <div class="form-sections">
+                <div class="form-section">
+                    <h3 class="form-section-title">CIMD Settings</h3>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <label for="public_base_url">Public Base URL <span style="color: #6c757d; font-weight: normal;">(optional)</span></label>
+                            <input type="url" id="public_base_url" name="public_base_url" value="{{ config.public_base_url }}"
+                                   placeholder="https://your-tunnel.ngrok.app">
+                            <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                                HTTPS URL where the authorization server can reach this tester (e.g. an ngrok/cloudflared tunnel).
+                                Leave empty to use the local URL (only works against a local AS).
+                            </small>
+                        </div>
+                        <div class="form-group">
+                            <label for="cimd_client_name">Client Name</label>
+                            <input type="text" id="cimd_client_name" name="cimd_client_name" value="{{ config.cimd_client_name }}"
+                                   placeholder="OAuth 2.0 Flow Tester">
+                            <small style="display: block; margin-top: 0.25rem; color: #6c757d; font-size: 0.875rem;">
+                                Shown on the authorization server's consent screen
+                            </small>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn">Update CIMD Settings</button>
+            </div>
+        </form>
+
+        {% if not cimd_url_https or cimd_url_local %}
+        <div class="alert alert-error" style="margin-top: 1rem;">
+            ⚠️ The document URL below is
+            {%- if not cimd_url_https %} not HTTPS (the spec requires <code>https</code>){%- endif %}
+            {%- if not cimd_url_https and cimd_url_local %} and{%- endif %}
+            {%- if cimd_url_local %} only reachable on localhost{%- endif %}.
+            A remote authorization server will not accept it as a <code>client_id</code> -
+            set a Public Base URL (e.g. an ngrok tunnel) above.
+        </div>
+        {% endif %}
+
+        <div style="margin-top: 1.5rem;">
+            <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Document URL (your client_id)</h3>
+            <div class="json-display" id="cimd-url-display" style="display: flex; align-items: center; justify-content: space-between; gap: 1rem;">
+                <span id="cimd-url-text">{{ cimd_url }}</span>
+                <button type="button" class="btn btn-secondary" style="flex-shrink: 0;" onclick="copyCimdUrl()">Copy</button>
+            </div>
+        </div>
+
+        <div style="margin-top: 1.5rem;">
+            <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Document Preview</h3>
+            <div class="json-display">{{ cimd_document }}</div>
+            <small style="display: block; margin-top: 0.5rem; color: #6c757d; font-size: 0.875rem;">
+                Served live at <a href="/client-metadata.json" target="_blank">/client-metadata.json</a> from the current
+                configuration (redirect URI and scopes come from the Authorization Flow tab).
+            </small>
+        </div>
+
+        <form method="POST" action="/use-cimd-client-id" style="margin-top: 1.5rem; text-align: center;">
+            <button type="submit" class="btn btn-success">Use as Client ID in Auth Flow</button>
+            <small style="display: block; margin-top: 0.5rem; color: #6c757d; font-size: 0.875rem;">
+                Sets client_id to the document URL, auth method to <code>none</code>, enables PKCE, and clears the client secret
+            </small>
+        </form>
+    </div>
+
+    <div class="card">
+        <h2>CIMD Document Validator</h2>
+        <p style="margin-bottom: 1.5rem; color: #6c757d;">
+            Fetch any URL-shaped <code>client_id</code> and lint it against
+            <code>draft-ietf-oauth-client-id-metadata-document</code> - URL shape, HTTP response,
+            and document contents. Useful for debugging why an authorization server rejects a CIMD client.
+        </p>
+
+        <div class="discovery-section">
+            <div class="form-row">
+                <div class="form-group">
+                    <label for="validate_url">Client ID URL</label>
+                    <input type="url" id="validate_url" value="{{ cimd_url }}"
+                           placeholder="https://example.com/client-metadata.json">
+                </div>
+                <div class="form-group">
+                    <label for="validate_verify_ssl">SSL Verification</label>
+                    <select id="validate_verify_ssl">
+                        <option value="true" {{ 'selected' if config.verify_ssl else '' }}>Enabled (Recommended)</option>
+                        <option value="false" {{ 'selected' if not config.verify_ssl else '' }}>Disabled (Testing Only)</option>
+                    </select>
+                </div>
+            </div>
+            <div style="margin-top: 1rem;">
+                <button type="button" class="btn" id="validate-btn" onclick="validateCimd()">
+                    🔍 Validate Document
+                </button>
+            </div>
+
+            <div id="validate-loading" style="display: none; margin-top: 1rem;">
+                <div style="background-color: #d1ecf1; border: 1px solid #bee5eb; border-radius: 4px; padding: 1rem; color: #0c5460;">
+                    🔄 Fetching and validating document...
+                </div>
+            </div>
+
+            <div id="validate-error" style="display: none; margin-top: 1rem;">
+                <div style="background-color: #f8d7da; border: 1px solid #f5c6cb; border-radius: 4px; padding: 1rem;">
+                    <div style="font-weight: 600; color: #721c24; margin-bottom: 0.5rem;">❌ Validation Failed</div>
+                    <div id="validate-error-content" style="color: #721c24; font-size: 0.9rem;"></div>
+                </div>
+            </div>
+
+            <div id="validate-results" style="display: none; margin-top: 1rem;">
+                <div id="validate-summary" style="border-radius: 4px; padding: 1rem; margin-bottom: 1rem; font-weight: 600;"></div>
+                <div id="validate-checks"></div>
+                <div id="validate-document-section" style="display: none; margin-top: 1.5rem;">
+                    <h3 style="color: #2c3e50; margin-bottom: 0.5rem;">Fetched Document</h3>
+                    <div class="json-display" id="validate-document"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>About Client ID Metadata Documents</h2>
+        <p style="color: #6c757d; margin-bottom: 1rem;">
+            CIMD (<code>draft-ietf-oauth-client-id-metadata-document</code>) lets an OAuth client identify
+            itself with a URL instead of a pre-registered client ID. The authorization server fetches the URL,
+            reads the JSON metadata document, and treats the client as registered. The MCP specification
+            (2026-07-28) deprecated Dynamic Client Registration in favor of CIMD.
+        </p>
+        <ul style="margin-left: 1.5rem; color: #495057;">
+            <li>The <code>client_id</code> URL must be HTTPS, with a path, and no fragment or userinfo</li>
+            <li>The document's <code>client_id</code> field must exactly string-match the URL</li>
+            <li>Shared-secret auth methods (<code>client_secret_*</code>) are forbidden - use <code>none</code> + PKCE, or <code>private_key_jwt</code></li>
+            <li>The AS advertises support via <code>client_id_metadata_document_supported: true</code> in its metadata (check the Discovery tool on the DCR tab)</li>
+        </ul>
+    </div>
+</div>
+
+<script>
+function copyCimdUrl() {
+    const url = document.getElementById('cimd-url-text').textContent.trim();
+    navigator.clipboard.writeText(url).then(() => {
+        alert('✅ Document URL copied to clipboard');
+    }).catch(() => {
+        prompt('Copy the URL below:', url);
+    });
+}
+
+async function validateCimd() {
+    const url = document.getElementById('validate_url').value.trim();
+    if (!url) {
+        alert('Please enter a client_id URL to validate');
+        return;
+    }
+
+    document.getElementById('validate-loading').style.display = 'block';
+    document.getElementById('validate-results').style.display = 'none';
+    document.getElementById('validate-error').style.display = 'none';
+
+    try {
+        const response = await fetch('/validate-cimd', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                client_id_url: url,
+                verify_ssl: document.getElementById('validate_verify_ssl').value === 'true'
+            })
+        });
+        const data = await response.json();
+        document.getElementById('validate-loading').style.display = 'none';
+
+        if (!data.success) {
+            document.getElementById('validate-error-content').textContent = data.error || 'Validation failed';
+            document.getElementById('validate-error').style.display = 'block';
+            return;
+        }
+
+        renderValidationResults(data);
+    } catch (error) {
+        document.getElementById('validate-loading').style.display = 'none';
+        document.getElementById('validate-error-content').textContent = 'Error: ' + error.message;
+        document.getElementById('validate-error').style.display = 'block';
+    }
+}
+
+function renderValidationResults(data) {
+    const styles = {
+        pass: { bg: '#d4edda', border: '#c3e6cb', color: '#155724', icon: '✅' },
+        warn: { bg: '#fff3cd', border: '#ffeeba', color: '#856404', icon: '⚠️' },
+        fail: { bg: '#f8d7da', border: '#f5c6cb', color: '#721c24', icon: '❌' }
+    };
+
+    // Summary banner
+    const s = data.summary || { passed: 0, warnings: 0, failed: 0 };
+    const summaryEl = document.getElementById('validate-summary');
+    const overall = s.failed > 0 ? 'fail' : (s.warnings > 0 ? 'warn' : 'pass');
+    const st = styles[overall];
+    summaryEl.style.backgroundColor = st.bg;
+    summaryEl.style.border = '1px solid ' + st.border;
+    summaryEl.style.color = st.color;
+    const verdict = s.failed > 0 ? 'Document has spec violations'
+        : (s.warnings > 0 ? 'Document is valid, with warnings' : 'Document looks fully valid');
+    summaryEl.textContent = `${st.icon} ${verdict} - ${s.passed} passed, ${s.warnings} warning(s), ${s.failed} failed`;
+
+    // Per-check rows
+    const checksEl = document.getElementById('validate-checks');
+    checksEl.innerHTML = '';
+    (data.checks || []).forEach(c => {
+        const cs = styles[c.status] || styles.fail;
+        const row = document.createElement('div');
+        row.style.cssText = `background-color: ${cs.bg}; border: 1px solid ${cs.border}; color: ${cs.color}; ` +
+            'border-radius: 4px; padding: 0.6rem 1rem; margin-bottom: 0.5rem; font-size: 0.9rem;';
+        const name = document.createElement('strong');
+        name.textContent = `${cs.icon} ${c.name}: `;
+        row.appendChild(name);
+        row.appendChild(document.createTextNode(c.detail));
+        checksEl.appendChild(row);
+    });
+
+    // Fetched document (or raw body when it wasn't valid JSON)
+    const docSection = document.getElementById('validate-document-section');
+    const docEl = document.getElementById('validate-document');
+    if (data.document) {
+        docEl.textContent = JSON.stringify(data.document, null, 2);
+        docSection.style.display = 'block';
+    } else if (data.raw_body) {
+        docEl.textContent = data.raw_body;
+        docSection.style.display = 'block';
+    } else {
+        docSection.style.display = 'none';
+    }
+
+    document.getElementById('validate-results').style.display = 'block';
+}
+</script>
+{% endblock %}

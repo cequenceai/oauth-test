@@ -26,7 +26,7 @@ CONFIG = {
     'scopes': os.getenv('SCOPES', 'refresh_token'),  # Space-separated scopes
     'redirect_uri': os.getenv('REDIRECT_URI', 'http://localhost:5001/callback'),
     'use_pkce': os.getenv('USE_PKCE', 'true').lower() in ('true', '1', 'yes', 'on'),
-    'client_auth_method': os.getenv('CLIENT_AUTH_METHOD', 'client_secret_post'),  # client_secret_post or client_secret_basic
+    'client_auth_method': os.getenv('CLIENT_AUTH_METHOD', 'client_secret_post'),  # client_secret_post, client_secret_basic, or none (public client / CIMD)
     # Additional OAuth parameters for specific providers (like Snowflake)
     'acr_values': os.getenv('ACR_VALUES', ''),
     'prompt': os.getenv('PROMPT', ''),
@@ -38,7 +38,12 @@ CONFIG = {
     'verify_ssl': os.getenv('VERIFY_SSL', 'true').lower() in ('true', '1', 'yes', 'on'),
     # DCR Configuration
     'registration_endpoint': os.getenv('REGISTRATION_ENDPOINT', 'https://your-auth-provider.com/oauth/register'),
-    'initial_access_token': os.getenv('INITIAL_ACCESS_TOKEN', '')
+    'initial_access_token': os.getenv('INITIAL_ACCESS_TOKEN', ''),
+    # CIMD Configuration (Client ID Metadata Documents)
+    # Public HTTPS base URL where the AS can reach this tester (e.g. an ngrok tunnel);
+    # the CIMD document is served at <public_base_url>/client-metadata.json
+    'public_base_url': os.getenv('PUBLIC_BASE_URL', ''),
+    'cimd_client_name': os.getenv('CIMD_CLIENT_NAME', 'OAuth 2.0 Flow Tester')
 }
 
 app = Flask(__name__)
@@ -88,6 +93,39 @@ def apply_extra_params(params, raw, label):
       continue
     params[key] = value
     print(f"Added extra {label} param: {key}={value}")
+
+
+def get_cimd_base_url():
+  """Base URL an authorization server would use to reach this tester.
+  Prefers the configured public base URL (e.g. an ngrok tunnel) since CIMD
+  requires an HTTPS URL the AS can actually fetch; falls back to the local
+  request URL for testing against a local AS."""
+  base = CONFIG['public_base_url'].strip() or request.url_root
+  return base.rstrip('/')
+
+
+def get_cimd_document_url():
+  """URL-shaped client_id pointing at this tester's client metadata document"""
+  return f"{get_cimd_base_url()}/client-metadata.json"
+
+
+def build_cimd_document():
+  """Build this tester's Client ID Metadata Document
+  (draft-ietf-oauth-client-id-metadata-document). CIMD forbids shared-secret
+  auth methods, so the document always declares token_endpoint_auth_method 'none'
+  (public client with PKCE)."""
+  document = {
+      'client_id': get_cimd_document_url(),
+      'client_name': CONFIG['cimd_client_name'],
+      'client_uri': get_cimd_base_url(),
+      'redirect_uris': [CONFIG['redirect_uri']],
+      'grant_types': ['authorization_code', 'refresh_token'],
+      'response_types': ['code'],
+      'token_endpoint_auth_method': 'none'
+  }
+  if CONFIG['scopes']:
+    document['scope'] = CONFIG['scopes']
+  return document
 
 
 def render_error_page(error_icon, error_title, error_message, action_text="Try Again", http_data=None):
@@ -294,7 +332,11 @@ def exchange_code_for_tokens(code):
       'Accept': 'application/json'
   }
 
-  if auth_method == 'client_secret_basic' and CONFIG['client_secret']:
+  if auth_method == 'none':
+    # Public client (e.g. CIMD / PKCE-only): no credentials, client_id in body
+    token_params['client_id'] = CONFIG['client_id']
+    print("Using token_endpoint_auth_method 'none': public client, client_id in body, no credentials")
+  elif auth_method == 'client_secret_basic' and CONFIG['client_secret']:
     # client_secret_basic: Use HTTP Basic Authentication
     # Encode client_id:client_secret as Base64 and send in Authorization header
     credentials = f"{CONFIG['client_id']}:{CONFIG['client_secret']}"
@@ -573,6 +615,213 @@ def health_check():
 def dcr_page():
   """Dynamic Client Registration page"""
   return render_template('dcr.html', config=CONFIG, registration_response=None)
+
+
+@app.route('/client-metadata.json')
+def client_metadata_document():
+  """Serve this tester's Client ID Metadata Document (CIMD).
+  An authorization server that supports CIMD fetches this URL when it is
+  used as the client_id in an authorization request."""
+  document = build_cimd_document()
+  print("\n📄 Serving CIMD client metadata document:")
+  print(json.dumps(document, indent=2))
+  response = jsonify(document)
+  # The AS SHOULD respect HTTP cache headers when re-fetching the document
+  response.headers['Cache-Control'] = 'public, max-age=300'
+  return response
+
+
+@app.route('/cimd')
+def cimd_page():
+  """Client ID Metadata Documents (CIMD) page"""
+  cimd_url = get_cimd_document_url()
+  parsed = urllib.parse.urlparse(cimd_url)
+  return render_template('cimd.html',
+                         config=CONFIG,
+                         cimd_url=cimd_url,
+                         cimd_url_https=(parsed.scheme == 'https'),
+                         cimd_url_local=(parsed.hostname in ('localhost', '127.0.0.1', '0.0.0.0')),
+                         cimd_document=json.dumps(build_cimd_document(), indent=2))
+
+
+@app.route('/update-cimd-config', methods=['POST'])
+def update_cimd_config():
+  """Update CIMD settings (public base URL + client name)"""
+  global CONFIG
+  CONFIG['public_base_url'] = request.form.get('public_base_url', '').strip().rstrip('/')
+  CONFIG['cimd_client_name'] = request.form.get(
+      'cimd_client_name', '').strip() or 'OAuth 2.0 Flow Tester'
+  flash('CIMD settings updated!', 'success')
+  return redirect('/cimd')
+
+
+@app.route('/use-cimd-client-id', methods=['POST'])
+def use_cimd_client_id():
+  """Point the Authorization Flow at this tester's CIMD document URL"""
+  global CONFIG
+  CONFIG['client_id'] = get_cimd_document_url()
+  CONFIG['client_secret'] = ''  # CIMD forbids shared secrets
+  CONFIG['client_auth_method'] = 'none'
+  CONFIG['use_pkce'] = True
+  print(f"Auth flow now using CIMD client_id: {CONFIG['client_id']}")
+  flash('Authorization Flow now uses the CIMD document URL as client_id (auth method: none, PKCE enabled)', 'success')
+  return redirect('/')
+
+
+@app.route('/validate-cimd', methods=['POST'])
+def validate_cimd():
+  """Fetch a client_id URL and lint it against draft-ietf-oauth-client-id-metadata-document"""
+  print("\n" + "="*50)
+  print("CIMD Document Validation")
+  print("="*50)
+
+  checks = []
+
+  def check(name, ok, detail, severity='fail'):
+    checks.append({'name': name, 'status': 'pass' if ok else severity, 'detail': detail})
+    icon = '✅' if ok else ('⚠️' if severity == 'warn' else '❌')
+    print(f"{icon} {name}: {detail}")
+    return ok
+
+  try:
+    data = request.json or {}
+    url = (data.get('client_id_url') or '').strip()
+    verify_ssl = data.get('verify_ssl', True)
+
+    if not url:
+      return jsonify({'success': False, 'error': 'client_id URL is required'}), 400
+
+    print(f"Validating: {url}")
+    parsed = urllib.parse.urlparse(url)
+
+    if not parsed.scheme or not parsed.netloc:
+      return jsonify({'success': False, 'error': 'Not a valid absolute URL'}), 400
+
+    # --- URL shape checks (Client Identifier URL requirements) ---
+    check('HTTPS scheme', parsed.scheme == 'https',
+          'Uses the https scheme' if parsed.scheme == 'https'
+          else f"client_id URLs MUST use the https scheme (got '{parsed.scheme}')")
+    check('Path component', parsed.path not in ('', '/'),
+          f"Path is '{parsed.path}'" if parsed.path not in ('', '/')
+          else 'client_id URLs MUST contain a path component')
+    check('No userinfo', '@' not in (parsed.netloc or ''),
+          'client_id URLs MUST NOT contain a userinfo component')
+    check('No fragment', not parsed.fragment,
+          'client_id URLs MUST NOT contain a fragment component')
+    check('No dot path segments', not any(seg in ('.', '..') for seg in parsed.path.split('/')),
+          'client_id URLs MUST NOT contain single-dot or double-dot path segments')
+    check('No query string', not parsed.query,
+          'client_id URLs SHOULD NOT contain a query string', severity='warn')
+
+    # --- Fetch the document ---
+    try:
+      response = requests.get(url, headers={'Accept': 'application/json'},
+                              timeout=10, verify=verify_ssl, allow_redirects=False)
+    except requests.exceptions.RequestException as e:
+      check('Document fetch', False, f'Could not fetch document: {str(e)}')
+      return jsonify({'success': True, 'fetched': False, 'checks': checks,
+                      'summary': summarize_checks(checks)})
+
+    redirect_note = f", redirects to {response.headers.get('Location')}" if response.is_redirect else ''
+    check('HTTP 200 response', response.status_code == 200,
+          f'Document served with 200 OK' if response.status_code == 200
+          else f'Document MUST be served with 200 OK (got {response.status_code}{redirect_note})')
+
+    content_type = (response.headers.get('Content-Type') or '').split(';')[0].strip().lower()
+    check('Content-Type', content_type == 'application/json' or content_type.endswith('+json'),
+          f"Content-Type is '{content_type or '(missing)'}'" + (
+              '' if content_type == 'application/json' else ' (expected application/json)'),
+          severity='warn' if content_type.endswith('+json') else 'fail')
+
+    has_cache_headers = bool(response.headers.get('Cache-Control')
+                             or response.headers.get('ETag') or response.headers.get('Expires'))
+    check('Cache headers', has_cache_headers,
+          'Cache headers present - the AS SHOULD respect them' if has_cache_headers
+          else 'No Cache-Control/ETag/Expires headers - the AS will pick its own cache lifetime',
+          severity='warn')
+
+    document = None
+    try:
+      document = response.json()
+      if not isinstance(document, dict):
+        document = None
+    except ValueError:
+      pass
+    check('Valid JSON object', document is not None,
+          'Document parsed as a JSON object' if document is not None
+          else 'Document body is not a valid JSON object')
+    if document is None:
+      return jsonify({'success': True, 'fetched': True, 'checks': checks,
+                      'summary': summarize_checks(checks),
+                      'http_status': response.status_code, 'content_type': content_type,
+                      'raw_body': response.text[:2000]})
+
+    # --- Document content checks ---
+    doc_client_id = document.get('client_id')
+    check('client_id matches URL', doc_client_id == url,
+          'client_id is an exact string match of the fetched URL' if doc_client_id == url
+          else f"client_id MUST exactly match the URL it was fetched from (document says '{doc_client_id}')")
+
+    redirect_uris = document.get('redirect_uris')
+    check('redirect_uris registered', isinstance(redirect_uris, list) and len(redirect_uris) > 0,
+          f"{len(redirect_uris)} redirect URI(s) registered" if redirect_uris
+          else 'redirect_uris missing - the AS MUST require registered redirect URIs (exact match)')
+
+    auth_method = document.get('token_endpoint_auth_method')
+    shared_secret_methods = {'client_secret_post', 'client_secret_basic', 'client_secret_jwt'}
+    check('No shared-secret auth method', auth_method not in shared_secret_methods,
+          f"token_endpoint_auth_method is '{auth_method or '(not specified)'}'" + (
+              ' - CIMD clients MUST NOT use shared-secret methods' if auth_method in shared_secret_methods else ''))
+
+    if auth_method == 'private_key_jwt':
+      check('Keys for private_key_jwt', bool(document.get('jwks_uri') or document.get('jwks')),
+            'private_key_jwt requires jwks_uri or jwks in the document')
+
+    check('client_name present', bool(document.get('client_name')),
+          f"client_name is '{document.get('client_name')}'" if document.get('client_name')
+          else 'client_name is recommended so the AS can display it on the consent screen',
+          severity='warn')
+
+    grant_types = document.get('grant_types') or []
+    check('authorization_code grant', not grant_types or 'authorization_code' in grant_types,
+          f"grant_types: {grant_types or '(defaults to authorization_code)'}"
+          if not grant_types or 'authorization_code' in grant_types
+          else f"grant_types omits authorization_code: {grant_types}",
+          severity='warn')
+
+    # Tester-specific convenience: would OUR authorization requests be accepted?
+    if isinstance(redirect_uris, list) and redirect_uris:
+      listed = CONFIG['redirect_uri'] in redirect_uris
+      check('Tester redirect URI listed', listed,
+            f"Configured redirect URI ({CONFIG['redirect_uri']}) " + (
+                'is registered in the document' if listed
+                else 'is NOT in redirect_uris - authorization requests from this tester would be rejected'),
+            severity='warn')
+
+    return jsonify({
+        'success': True,
+        'fetched': True,
+        'checks': checks,
+        'summary': summarize_checks(checks),
+        'http_status': response.status_code,
+        'content_type': content_type,
+        'document': document
+    })
+
+  except Exception as e:
+    print(f"\n❌ Validation error: {str(e)}")
+    import traceback
+    traceback.print_exc()
+    return jsonify({'success': False, 'error': str(e), 'checks': checks}), 500
+
+
+def summarize_checks(checks):
+  """Tally pass/warn/fail for a list of validation checks"""
+  return {
+      'passed': sum(1 for c in checks if c['status'] == 'pass'),
+      'warnings': sum(1 for c in checks if c['status'] == 'warn'),
+      'failed': sum(1 for c in checks if c['status'] == 'fail')
+  }
 
 
 @app.route('/register-client', methods=['POST'])
@@ -919,7 +1168,8 @@ def discover_endpoints():
           'response_types_supported': metadata.get('response_types_supported', []),
           'grant_types_supported': metadata.get('grant_types_supported', []),
           'token_endpoint_auth_methods_supported': metadata.get('token_endpoint_auth_methods_supported', []),
-          'registration_endpoint_available': bool(metadata.get('registration_endpoint'))
+          'registration_endpoint_available': bool(metadata.get('registration_endpoint')),
+          'client_id_metadata_document_supported': bool(metadata.get('client_id_metadata_document_supported'))
       }
 
       # Store discovered metadata in backend for later use
@@ -973,6 +1223,8 @@ if __name__ == '__main__':
     print(f"- Extra Auth Params: {parse_extra_params(CONFIG['auth_extra_params'])}")
   if CONFIG['token_extra_params']:
     print(f"- Extra Token Params: {parse_extra_params(CONFIG['token_extra_params'])}")
+  if CONFIG['public_base_url']:
+    print(f"- CIMD Document URL: {CONFIG['public_base_url'].rstrip('/')}/client-metadata.json")
   print("\nMake sure your .env file is properly configured!")
   print("=" * 60)
 

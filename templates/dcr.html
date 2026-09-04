@@ -12,6 +12,7 @@
     <div class="tab-navigation">
         <a href="/" class="tab-link">Authorization Code Flow</a>
         <a href="/dcr" class="tab-link active">Dynamic Client Registration</a>
+        <a href="/cimd" class="tab-link">CIMD</a>
     </div>
     
     {% with messages = get_flashed_messages(with_categories=true) %}
@@ -421,6 +422,12 @@ async function discoverEndpoints() {
                 html += `<div style="margin-bottom: 0.5rem;"><strong>✅ Registration Endpoint:</strong> ${data.registration_endpoint}</div>`;
             } else {
                 html += `<div style="margin-bottom: 0.5rem;"><strong>⚠️ Registration Endpoint:</strong> Not available (DCR not supported)</div>`;
+            }
+
+            if (data.client_id_metadata_document_supported) {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>✅ CIMD (URL client_id):</strong> Supported - see the CIMD tab</div>`;
+            } else {
+                html += `<div style="margin-bottom: 0.5rem;"><strong>⚠️ CIMD (URL client_id):</strong> Not advertised in provider metadata</div>`;
             }
             
             if (data.authorization_endpoint) {
